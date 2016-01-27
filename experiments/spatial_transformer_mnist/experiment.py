@@ -33,14 +33,14 @@ def get_net(args):
         num_filters=20,
         nonlinearity=leaky_rectify)
     transform_pool1 = MaxPool2DLayer(transform_conv1,
-        stride=1,
+        stride=2,
         pool_size=(2,2))
     transform_conv2 = Conv2DLayer(transform_pool1,
         filter_size=(5,5),
         num_filters=20,
         nonlinearity=leaky_rectify)
     transform_pool2 = MaxPool2DLayer(transform_conv2,
-        stride=1,
+        stride=2,
         pool_size=(2,2))        
     transform_dense = DenseLayer(transform_pool2,
         num_units=20,
