@@ -24,77 +24,48 @@ def get_net(args):
     max_epochs = args["max_epochs"]
     kw = dict()
     l_in = InputLayer( (None, 1, 28, 28) )
-    if "transformer" in args:
-        transform_conv1 = Conv2DLayer(l_in,
-                                      filter_size=(5,5),
-                                      num_filters=20,
-                                      nonlinearity=leaky_rectify,
-                                      W=GlorotUniform(gain="relu"))
-        transform_pool1 = MaxPool2DLayer(transform_conv1,
-                                         pool_size=(2,2))
-        transform_conv2 = Conv2DLayer(transform_pool1,
-                                      filter_size=(5,5),
-                                      num_filters=20,
-                                      nonlinearity=leaky_rectify,
-                                      W=GlorotUniform(gain="relu"))
-        transform_pool2 = MaxPool2DLayer(transform_conv2,
-                                         pool_size=(2,2))        
-        transform_dense = DenseLayer(transform_pool2,
-                                     num_units=20,
-                                     nonlinearity=leaky_rectify,
-                                     W=GlorotUniform(gain="relu"))
-        transform_six = DenseLayer(transform_dense,
-                                   num_units=6,
-                                   nonlinearity=identity,
-                                   W=GlorotUniform())
-        l_in = TransformerLayer(l_in, transform_six) 
-
-    """
+    transform_prepool = MaxPool2DLayer(
+        l_in,
+        pool_size=(2,2))
+    transform_conv1 = Conv2DLayer(transform_prepool,
+        filter_size=(5,5),
+        num_filters=20,
+        nonlinearity=leaky_rectify)
+    transform_pool1 = MaxPool2DLayer(transform_conv1,
+        stride=1,
+        pool_size=(2,2))
+    transform_conv2 = Conv2DLayer(transform_pool1,
+        filter_size=(5,5),
+        num_filters=20,
+        nonlinearity=leaky_rectify)
+    transform_pool2 = MaxPool2DLayer(transform_conv2,
+        stride=1,
+        pool_size=(2,2))        
+    transform_dense = DenseLayer(transform_pool2,
+        num_units=20,
+        nonlinearity=leaky_rectify)
+    transform_six = DenseLayer(transform_dense,
+        num_units=6,
+        nonlinearity=identity)
+    l_in = TransformerLayer(l_in, transform_six)
     l_conv1 = Conv2DLayer(l_in,
-                          num_filters=16,
-                          filter_size=(5,5),
-                          W=GlorotUniform(gain="relu"),
-                          nonlinearity=leaky_rectify)
+        num_filters=16,
+        nonlinearity=leaky_rectify,
+        filter_size=(9,9),
+        stride=1)
     l_pool1 = MaxPool2DLayer(l_conv1,
-                             pool_size=(2,2))
+        pool_size=(2,2),
+        stride=2)
     l_conv2 = Conv2DLayer(l_pool1,
-                          num_filters=32,
-                          filter_size=(3,3),
-                          W=GlorotUniform(gain="relu"),
-                          nonlinearity=leaky_rectify)    
+        num_filters=32,
+        nonlinearity=leaky_rectify,
+        filter_size=(7,7))
     l_pool2 = MaxPool2DLayer(l_conv2,
-                             pool_size=(2,2))
-    l_conv3 = Conv2DLayer(l_pool2,
-                          num_filters=32,
-                          filter_size=(3,3),
-                          W=GlorotUniform(gain="relu"),
-                          nonlinearity=leaky_rectify)
-    l_dense = DenseLayer(l_conv3,
-                         num_units=100,
-                         nonlinearity=leaky_rectify,
-                         W=GlorotUniform(gain="relu"))
-    """
-    l_conv1 = Conv2DLayer(l_in,
-                          num_filters=16,
-                          nonlinearity=leaky_rectify,
-                          W=GlorotUniform(gain="relu"),
-                          filter_size=(9,9),
-                          stride=1)
-    l_pool1 = MaxPool2DLayer(l_conv1,
-                             pool_size=(2,2),
-                             stride=2)
-    l_conv2 = Conv2DLayer(l_pool1,
-                          num_filters=32,
-                          nonlinearity=leaky_rectify,
-                          W=GlorotUniform(gain="relu"),
-                          filter_size=(7,7))
-    l_pool2 = MaxPool2DLayer(l_conv2,
-                             pool_size=(2,2),
-                             stride=2)
+        pool_size=(2,2),
+        stride=2)
     l_out = DenseLayer(l_pool2,
-                       num_units=10,
-                       nonlinearity=softmax,
-                       W=GlorotUniform())
+        num_units=10,
+        nonlinearity=softmax)
     kw["max_epochs"] = max_epochs
     kw["update"] = adagrad
     kw["update_learning_rate"] = args["alpha"]
@@ -142,7 +113,7 @@ if __name__ == "__main__":
     args["batch_size"] = 128
     args["out_model"] = "exp1.model"
     args["out_stats"] = "exp1.stats"
-    #args["transformer"] = True
+   # args["transformer"] = True
     train(args)
     
     print data
