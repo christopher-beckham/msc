@@ -1,6 +1,7 @@
 import cPickle as pickle
 import gzip
 from matplotlib import pyplot as plt
+import numpy as np
 
 def load_mnist(filename="../data/mnist.pkl.gz"):
     with gzip.open(filename) as f:
@@ -13,6 +14,14 @@ def load_mnist(filename="../data/mnist.pkl.gz"):
     Xv = Xv.reshape( Xv.shape[0], 1, 28, 28 )
     Xtest = Xtest.reshape( Xtest.shape[0], 1, 28, 28 )
     return ( (Xt,yt), (Xv, yv), (Xtest, ytest) )
+
+def load_cluttered_mnist_train_only(filename="../data/mnist_cluttered_60x60_6distortions.npz"):
+    dat = np.load(filename)
+    Xt = dat["x_train"]
+    Xt = Xt.reshape( (Xt.shape[0], 1, 60, 60) )
+    yt = dat["y_train"]
+    yt = np.argmax(yt, axis=-1)
+    return Xt, yt
 
 def save_stats_at_every(schedule, filename):
     def after_epoch(net, info):

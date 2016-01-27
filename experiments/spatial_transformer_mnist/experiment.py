@@ -22,8 +22,9 @@ from helper import *
     
 def get_net(args):
     max_epochs = args["max_epochs"]
+    input_shape = args["input_shape"]
     kw = dict()
-    l_in = InputLayer( (None, 1, 28, 28) )
+    l_in = InputLayer(input_shape)
     transform_prepool = MaxPool2DLayer(
         l_in,
         pool_size=(2,2))
@@ -48,7 +49,8 @@ def get_net(args):
         num_units=6,
         nonlinearity=identity)
     l_in = TransformerLayer(l_in, transform_six)
-    l_conv1 = Conv2DLayer(l_in,
+    l_prepool = MaxPool2DLayer(l_in, pool_size=(2,2)) 
+    l_conv1 = Conv2DLayer(l_prepool,
         num_filters=16,
         nonlinearity=leaky_rectify,
         filter_size=(9,9),
@@ -101,19 +103,3 @@ def test(args, model):
     X_test = X_test.reshape( (X_test.shape[0], 1, X_test.shape[1]) )
     return net1.predict_proba(X_test).tolist()
 
-if __name__ == "__main__":
-    data = load_mnist("../../data/mnist.pkl.gz")
-    train_set, _, _ = data
-    args = dict()
-    args["X_train"] = train_set[0]
-    args["y_train"] = train_set[1]
-    args["max_epochs"] = 100
-    args["alpha"] = 0.01
-    args["seed"] = 0
-    args["batch_size"] = 128
-    args["out_model"] = "exp1.model"
-    args["out_stats"] = "exp1.stats"
-   # args["transformer"] = True
-    train(args)
-    
-    print data
