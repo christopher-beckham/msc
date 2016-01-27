@@ -23,38 +23,78 @@ from helper import *
 def get_net(args):
     max_epochs = args["max_epochs"]
     kw = dict()
-    layer_conf = [
-        ('input', layers.InputLayer),
-        ('conv1', layers.Conv2DLayer),
-        ('pool1', layers.MaxPool2DLayer),
-        ('conv2', layers.Conv2DLayer),
-        ('pool2', layers.MaxPool2DLayer),
-        ('conv3', layers.Conv2DLayer),
-        ('dense', layers.DenseLayer),
-        ('output', layers.DenseLayer)
-    ]
-    kw["input_shape"] = (None, 1, 28, 28)
-    kw["conv1_num_filters"] = 16
-    kw["conv1_filter_size"] = (5,5)
-    kw["conv1_W"] = GlorotUniform(gain="relu")
-    kw["conv1_nonlinearity"] = leaky_rectify
-    kw["pool1_pool_size"] = (2,2)
-    kw["conv2_num_filters"] = 32
-    kw["conv2_filter_size"] = (3,3)
-    kw["conv2_W"] = GlorotUniform(gain="relu")
-    kw["conv2_nonlinearity"] = leaky_rectify
-    kw["pool2_pool_size"] = (2,2)
-    kw["conv3_num_filters"] = 32
-    kw["conv3_filter_size"] = (3,3)
-    kw["conv3_W"] = GlorotUniform(gain="relu")
-    #kw["pool3_pool_size"] = (2,2)
-    kw["dense_num_units"] = 100
-    kw["dense_nonlinearity"] = leaky_rectify
-    kw["dense_W"] = GlorotUniform(gain="relu")
-    kw["output_num_units"] = 10
-    kw["output_nonlinearity"] = softmax
-    kw["output_W"] = GlorotUniform()
-    kw["layers"] = layer_conf
+    l_in = InputLayer( (None, 1, 28, 28) )
+    if "transformer" in args:
+        transform_conv1 = Conv2DLayer(l_in,
+                                      filter_size=(5,5),
+                                      num_filters=20,
+                                      nonlinearity=leaky_rectify,
+                                      W=GlorotUniform(gain="relu"))
+        transform_pool1 = MaxPool2DLayer(transform_conv1,
+                                         pool_size=(2,2))
+        transform_conv2 = Conv2DLayer(transform_pool1,
+                                      filter_size=(5,5),
+                                      num_filters=20,
+                                      nonlinearity=leaky_rectify,
+                                      W=GlorotUniform(gain="relu"))
+        transform_pool2 = MaxPool2DLayer(transform_conv2,
+                                         pool_size=(2,2))        
+        transform_dense = DenseLayer(transform_pool2,
+                                     num_units=20,
+                                     nonlinearity=leaky_rectify,
+                                     W=GlorotUniform(gain="relu"))
+        transform_six = DenseLayer(transform_dense,
+                                   num_units=6,
+                                   nonlinearity=identity,
+                                   W=GlorotUniform())
+        l_in = TransformerLayer(l_in, transform_six) 
+
+    """
+    l_conv1 = Conv2DLayer(l_in,
+                          num_filters=16,
+                          filter_size=(5,5),
+                          W=GlorotUniform(gain="relu"),
+                          nonlinearity=leaky_rectify)
+    l_pool1 = MaxPool2DLayer(l_conv1,
+                             pool_size=(2,2))
+    l_conv2 = Conv2DLayer(l_pool1,
+                          num_filters=32,
+                          filter_size=(3,3),
+                          W=GlorotUniform(gain="relu"),
+                          nonlinearity=leaky_rectify)    
+    l_pool2 = MaxPool2DLayer(l_conv2,
+                             pool_size=(2,2))
+    l_conv3 = Conv2DLayer(l_pool2,
+                          num_filters=32,
+                          filter_size=(3,3),
+                          W=GlorotUniform(gain="relu"),
+                          nonlinearity=leaky_rectify)
+    l_dense = DenseLayer(l_conv3,
+                         num_units=100,
+                         nonlinearity=leaky_rectify,
+                         W=GlorotUniform(gain="relu"))
+    """
+    l_conv1 = Conv2DLayer(l_in,
+                          num_filters=16,
+                          nonlinearity=leaky_rectify,
+                          W=GlorotUniform(gain="relu"),
+                          filter_size=(9,9),
+                          stride=1)
+    l_pool1 = MaxPool2DLayer(l_conv1,
+                             pool_size=(2,2),
+                             stride=2)
+    l_conv2 = Conv2DLayer(l_pool1,
+                          num_filters=32,
+                          nonlinearity=leaky_rectify,
+                          W=GlorotUniform(gain="relu"),
+                          filter_size=(7,7))
+    l_pool2 = MaxPool2DLayer(l_conv2,
+                             pool_size=(2,2),
+                             stride=2)
+    l_out = DenseLayer(l_pool2,
+                       num_units=10,
+                       nonlinearity=softmax,
+                       W=GlorotUniform())
     kw["max_epochs"] = max_epochs
     kw["update"] = adagrad
     kw["update_learning_rate"] = args["alpha"]
@@ -63,7 +103,9 @@ def get_net(args):
     out_model = args["out_model"]
     out_stats = args["out_stats"]
     kw["on_epoch_finished"] = [ save_model_on_best(out_model), save_stats_on_best(out_stats) ]
-    net = NeuralNet(**kw)
+    bs = args["batch_size"]
+    kw["batch_iterator_train"] = BatchIterator(batch_size=bs)
+    net = NeuralNet(l_out, **kw)
     return net
     
 def train(args):
@@ -97,8 +139,10 @@ if __name__ == "__main__":
     args["max_epochs"] = 100
     args["alpha"] = 0.01
     args["seed"] = 0
+    args["batch_size"] = 128
     args["out_model"] = "exp1.model"
     args["out_stats"] = "exp1.stats"
+    #args["transformer"] = True
     train(args)
     
     print data
