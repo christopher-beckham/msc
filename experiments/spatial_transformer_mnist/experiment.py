@@ -51,7 +51,7 @@ def get_net(args):
     l_in = TransformerLayer(l_in, transform_six)
     l_prepool = MaxPool2DLayer(l_in, pool_size=(2,2)) 
     l_conv1 = Conv2DLayer(l_prepool,
-        num_filters=16,
+        num_filters=32,
         nonlinearity=leaky_rectify,
         filter_size=(9,9),
         stride=1)
@@ -65,6 +65,10 @@ def get_net(args):
     l_pool2 = MaxPool2DLayer(l_conv2,
         pool_size=(2,2),
         stride=2)
+    # the paper did not mention having an fc before the softmax??
+    l_penult = DenseLayer(l_pool2,
+        num_units=100,
+        nonlinearity=leaky_rectify)
     l_out = DenseLayer(l_pool2,
         num_units=10,
         nonlinearity=softmax)
