@@ -7,6 +7,8 @@ import numpy as np
 from skimage import io
 from skimage import img_as_float
 from nolearn.lasagne import *
+import theano
+from theano import tensor as T
 
 """
 mnist
@@ -139,6 +141,19 @@ def weighted_kappa(human_rater, actual_rater, num_classes=5):
     kappa = 1 - (sum_matrix(W, O) / sum_matrix(W, E))
     return kappa
 
+def expectation(q):
+    s = 0
+    for i in range(0, len(q)):
+        s += (i*q[i])
+    return s
+
+def np_kappa(yb, yprob):
+    #print yb
+    #print yprob
+    yb = yb.flatten().tolist()
+    pred_expectations = [ int(round(expectation(x))) for x in yprob ]
+    #print pred_expectations
+    return weighted_kappa(pred_expectations, yb)
 
 def load_image(filename, rotate=False, zmuv=False):
     img = io.imread(filename)
