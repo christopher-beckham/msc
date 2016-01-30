@@ -163,3 +163,8 @@ def load_dr_train_labels(filename):
             tps.append( (line[0] + ".jpeg", line[1]) )
     random.shuffle(tps)
     return map(list, zip(*tps))
+
+def get_kappa_loss(num_classes):
+    def this_kappa_fn(pred_vector, actual_vector):
+        return (T.dot(pred_vector, T.arange(0,num_classes)) - actual_vector)**2
+    return this_kappa_fn
