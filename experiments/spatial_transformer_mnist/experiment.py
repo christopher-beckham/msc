@@ -3,6 +3,7 @@ from lasagne import *
 from lasagne.updates import *
 from lasagne.nonlinearities import *
 from lasagne.layers import *
+from lasagne.layers.dnn import *
 from lasagne.objectives import *
 from lasagne.init import *
 from nolearn.lasagne import *
@@ -25,21 +26,21 @@ def get_net(args):
     input_shape = args["input_shape"]
     kw = dict()
     l_in = InputLayer(input_shape)
-    transform_prepool = MaxPool2DLayer(
+    transform_prepool = MaxPool2DDNNLayer(
         l_in,
         pool_size=(2,2))
-    transform_conv1 = Conv2DLayer(transform_prepool,
+    transform_conv1 = Conv2DDNNLayer(transform_prepool,
         filter_size=(5,5),
         num_filters=20,
         nonlinearity=leaky_rectify)
-    transform_pool1 = MaxPool2DLayer(transform_conv1,
+    transform_pool1 = MaxPool2DDNNLayer(transform_conv1,
         stride=2,
         pool_size=(2,2))
-    transform_conv2 = Conv2DLayer(transform_pool1,
+    transform_conv2 = Conv2DDNNLayer(transform_pool1,
         filter_size=(5,5),
         num_filters=20,
         nonlinearity=leaky_rectify)
-    transform_pool2 = MaxPool2DLayer(transform_conv2,
+    transform_pool2 = MaxPool2DDNNLayer(transform_conv2,
         stride=2,
         pool_size=(2,2))        
     transform_dense = DenseLayer(transform_pool2,
@@ -49,27 +50,34 @@ def get_net(args):
         num_units=6,
         nonlinearity=identity)
     l_in = TransformerLayer(l_in, transform_six)
-    l_prepool = MaxPool2DLayer(l_in, pool_size=(2,2)) 
-    l_conv1 = Conv2DLayer(l_prepool,
+    l_prepool = MaxPool2DDNNLayer(l_in, pool_size=(2,2) ) 
+    l_conv1 = Conv2DDNNLayer(l_prepool,
         num_filters=32,
         nonlinearity=leaky_rectify,
-        filter_size=(9,9),
+        filter_size=(5,5),
         stride=1)
-    l_pool1 = MaxPool2DLayer(l_conv1,
+    l_pool1 = MaxPool2DDNNLayer(l_conv1,
         pool_size=(2,2),
         stride=2)
-    l_conv2 = Conv2DLayer(l_pool1,
-        num_filters=32,
+    l_conv2 = Conv2DDNNLayer(l_pool1,
+        num_filters=64,
         nonlinearity=leaky_rectify,
-        filter_size=(7,7))
-    l_pool2 = MaxPool2DLayer(l_conv2,
+        filter_size=(3,3))
+    l_pool2 = MaxPool2DDNNLayer(l_conv2,
+        pool_size=(2,2),
+        stride=2)
+    l_conv3 = Conv2DDNNLayer(l_pool2,
+        num_filters=64,
+        nonlinearity=leaky_rectify,
+        filter_size=(3,3))
+    l_pool3 = MaxPool2DDNNLayer(l_conv3,
         pool_size=(2,2),
         stride=2)
     # the paper did not mention having an fc before the softmax??
-    l_penult = DenseLayer(l_pool2,
-        num_units=100,
-        nonlinearity=leaky_rectify)
-    l_out = DenseLayer(l_pool2,
+    #l_penult = DenseLayer(l_pool2,
+    #    num_units=32,
+    #    nonlinearity=leaky_rectify)
+    l_out = DenseLayer(l_pool3,
         num_units=10,
         nonlinearity=softmax)
     kw["max_epochs"] = max_epochs
@@ -81,7 +89,7 @@ def get_net(args):
     out_stats = args["out_stats"]
     kw["on_epoch_finished"] = [ save_model_on_best(out_model), save_stats_on_best(out_stats) ]
     bs = args["batch_size"]
-    kw["batch_iterator_train"] = BatchIterator(batch_size=bs)
+    kw["batch_iterator_train"] = ShufflingBatchIterator(batch_size=bs)
     net = NeuralNet(l_out, **kw)
     return net
     
