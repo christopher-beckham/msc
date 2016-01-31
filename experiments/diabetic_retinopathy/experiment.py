@@ -159,11 +159,14 @@ def get_net(args):
     out_model = args["out_model"]
     out_stats = args["out_stats"]
     kw["on_epoch_finished"] = [ save_model_on_best(out_model), save_stats_on_best(out_stats) ]
+    kw["custom_score"] = ["kappa", np_kappa]
     bs = args["batch_size"]
     filenames = args["filenames"]
     prefix = args["prefix"]
     kw["batch_iterator_train"] = ImageBatchIterator(
-        filenames=filenames, prefix=prefix, zmuv=True, batch_size=bs)
+        batch_size=bs, shuffle=True, filenames=filenames, prefix=prefix, zmuv=True)
+    kw["batch_iterator_test"] = ImageBatchIterator(
+        batch_size=bs, shuffle=False, filenames=filenames, prefix=prefix, zmuv=True)
     net = NeuralNet(l_out, **kw)
     return net
     
