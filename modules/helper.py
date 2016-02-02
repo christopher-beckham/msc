@@ -9,6 +9,7 @@ from skimage import img_as_float
 from nolearn.lasagne import *
 import theano
 from theano import tensor as T
+from skimage.transform import resize, rotate
 
 """
 mnist
@@ -47,10 +48,10 @@ def save_stats_at_every(schedule, filename):
 def write_stats(info, filename):
     f = open("%s.csv" % filename, "wb")
     # [valid_accuracy',  'dur', 'abs_error']
-    f.write("epoch,train_loss,train_loss_best,valid_loss,valid_loss_best,valid_accuracy,dur\n")
+    f.write("epoch,train_loss,train_loss_best,valid_loss,valid_loss_best,valid_accuracy,valid_kappa,dur\n")
     for row in info:
-            f.write("%f,%f,%f,%f,%f,%f,%f\n" % (row["epoch"], row["train_loss"], \
-                    row["train_loss_best"], row["valid_loss"], row["valid_loss_best"], row["valid_accuracy"], row["dur"]))
+            f.write("%f,%f,%f,%f,%f,%f,%f,%f\n" % (row["epoch"], row["train_loss"], \
+                    row["train_loss_best"], row["valid_loss"], row["valid_loss_best"], row["valid_accuracy"], row["valid_kappa"], row["dur"]))
     #pickle.dump(info, f, pickle.HIGHEST_PROTOCOL)
     f.close()
 
@@ -80,20 +81,21 @@ class ShufflingBatchIterator(BatchIterator):
             yield res
 
 class ImageBatchIterator(BatchIterator):
-    def __init__(self, filenames, prefix, zmuv=False, *args, **kwds):
+    def __init__(self, filenames, prefix, zmuv=False, augment=False, *args, **kwds):
         super(ImageBatchIterator, self).__init__(*args, **kwds)
         self.filenames = filenames
         self.prefix = prefix
         self.zmuv = zmuv
+        self.augment = augment
     def transform(self, Xb, yb):
         filenames = np.asarray( [ self.filenames[int(x)] for x in Xb.flatten().tolist() ] )
         if self.prefix == "":
             Xb_actual = np.asarray(
-                [ load_image(x, zmuv=self.zmuv) for x in filenames ], dtype="float32" 
+                [ load_image(x, zmuv=self.zmuv, augment=self.augment) for x in filenames ], dtype="float32" 
             )
         else:
             Xb_actual = np.asarray(
-                [ load_image(self.prefix + os.path.sep + x, zmuv=self.zmuv) for x in filenames ], dtype="float32" 
+                [ load_image(self.prefix + os.path.sep + x, zmuv=self.zmuv, augment=self.augment) for x in filenames ], dtype="float32" 
             )
         return Xb_actual, yb
 
@@ -155,11 +157,19 @@ def np_kappa(yb, yprob):
     #print pred_expectations
     return weighted_kappa(pred_expectations, yb)
 
-def load_image(filename, rotate=False, zmuv=False):
+def load_image(filename, augment=False, zmuv=False):
     img = io.imread(filename)
     img = img_as_float(img)
-    if rotate:
-        img = np.rot90(img, random.randint(0, 3))
+    if augment:
+        g = random.randint(0, 1)
+        if g == 1: # ok, augment the image
+            f = random.randint(0, 1)
+            if f == 0:
+                # flip the image and then do a random rotation
+                img = rotate( np.fliplr(img), random.randint(0, 360), cval=0.5)
+            elif f == 1:
+                # do a random rotation
+                img = rotate(img, random.randint(0,360), cval=0.5)
     if len(img.shape) == 3 and img.shape[2] == 3:
         img = np.asarray( [ img[...,0], img[...,1], img[...,2] ] )
     else:

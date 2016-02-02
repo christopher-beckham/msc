@@ -159,14 +159,14 @@ def get_net(args):
     out_model = args["out_model"]
     out_stats = args["out_stats"]
     kw["on_epoch_finished"] = [ save_model_on_best(out_model), save_stats_on_best(out_stats) ]
-    kw["custom_score"] = ["kappa", np_kappa]
+    kw["custom_score"] = ["valid_kappa", np_kappa]
     bs = args["batch_size"]
     filenames = args["filenames"]
     prefix = args["prefix"]
     kw["batch_iterator_train"] = ImageBatchIterator(
-        batch_size=bs, shuffle=True, filenames=filenames, prefix=prefix, zmuv=True)
+        batch_size=bs, shuffle=True, filenames=filenames, prefix=prefix, zmuv=True, augment=True)
     kw["batch_iterator_test"] = ImageBatchIterator(
-        batch_size=bs, shuffle=False, filenames=filenames, prefix=prefix, zmuv=True)
+        batch_size=bs, shuffle=False, filenames=filenames, prefix=prefix, zmuv=True, augment=False)
     net = NeuralNet(l_out, **kw)
     return net
     
@@ -175,7 +175,11 @@ def train(args):
     random.seed( args["seed"] )
     y_train = np.asarray(args["y_train"], dtype="int32")
     net1 = get_net(args)
-    net1.initialize()
+    if "in_model" in args:
+        sys.stderr.write("loading existing model: %s\n" % args["in_model"])
+        net1.load_params_from(args["in_model"])
+    else:
+        net1.initialize()
     X_train = np.asarray(args["X_train"], dtype="float32")
     #with Capturing() as output:
     model = net1.fit(X_train, y_train)
