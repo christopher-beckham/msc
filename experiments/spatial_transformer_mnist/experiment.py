@@ -1,16 +1,27 @@
+import sys
 import lasagne
 from lasagne import *
 from lasagne.updates import *
 from lasagne.nonlinearities import *
 from lasagne.layers import *
-from lasagne.layers.dnn import *
+use_dnn = True
+try:
+    from lasagne.layers.dnn import *
+except:
+    use_dnn = False
+    sys.stderr.write("cudnn not detected\n")
+if use_dnn:
+    conv2d = Conv2DDNNLayer
+    maxpool2d = MaxPool2DDNNLayer
+else:
+    conv2d = Conv2DLayer
+    maxpool2d = MaxPool2DLayer
 from lasagne.objectives import *
 from lasagne.init import *
 from nolearn.lasagne import *
 import gzip
 import os
 import numpy as np
-import sys
 import re
 import random
 import tempfile
@@ -22,25 +33,28 @@ sys.path.append("../../modules/")
 from helper import *
     
 def get_net(args):
+    flip_filters = False if "dont_flip_filters" in args else True
     max_epochs = args["max_epochs"]
     input_shape = args["input_shape"]
     kw = dict()
     l_in = InputLayer(input_shape)
-    transform_prepool = MaxPool2DDNNLayer(
+    transform_prepool = maxpool2d(
         l_in,
         pool_size=(2,2))
-    transform_conv1 = Conv2DDNNLayer(transform_prepool,
+    transform_conv1 = conv2d(transform_prepool,
         filter_size=(5,5),
         num_filters=20,
+        flip_filters=flip_filters,
         nonlinearity=leaky_rectify)
-    transform_pool1 = MaxPool2DDNNLayer(transform_conv1,
+    transform_pool1 = maxpool2d(transform_conv1,
         stride=2,
         pool_size=(2,2))
-    transform_conv2 = Conv2DDNNLayer(transform_pool1,
+    transform_conv2 = conv2d(transform_pool1,
         filter_size=(5,5),
         num_filters=20,
+        flip_filters=flip_filters,
         nonlinearity=leaky_rectify)
-    transform_pool2 = MaxPool2DDNNLayer(transform_conv2,
+    transform_pool2 = maxpool2d(transform_conv2,
         stride=2,
         pool_size=(2,2))        
     transform_dense = DenseLayer(transform_pool2,
@@ -50,27 +64,30 @@ def get_net(args):
         num_units=6,
         nonlinearity=identity)
     l_in = TransformerLayer(l_in, transform_six)
-    l_prepool = MaxPool2DDNNLayer(l_in, pool_size=(2,2) ) 
-    l_conv1 = Conv2DDNNLayer(l_prepool,
+    l_prepool = maxpool2d(l_in, pool_size=(2,2) ) 
+    l_conv1 = conv2d(l_prepool,
         num_filters=32,
         nonlinearity=leaky_rectify,
+        flip_filters=flip_filters,
         filter_size=(5,5),
         stride=1)
-    l_pool1 = MaxPool2DDNNLayer(l_conv1,
+    l_pool1 = maxpool2d(l_conv1,
         pool_size=(2,2),
         stride=2)
-    l_conv2 = Conv2DDNNLayer(l_pool1,
+    l_conv2 = conv2d(l_pool1,
         num_filters=64,
+        flip_filters=flip_filters,
         nonlinearity=leaky_rectify,
         filter_size=(3,3))
-    l_pool2 = MaxPool2DDNNLayer(l_conv2,
+    l_pool2 = maxpool2d(l_conv2,
         pool_size=(2,2),
         stride=2)
-    l_conv3 = Conv2DDNNLayer(l_pool2,
+    l_conv3 = conv2d(l_pool2,
         num_filters=64,
+        flip_filters=flip_filters,
         nonlinearity=leaky_rectify,
         filter_size=(3,3))
-    l_pool3 = MaxPool2DDNNLayer(l_conv3,
+    l_pool3 = maxpool2d(l_conv3,
         pool_size=(2,2),
         stride=2)
     # the paper did not mention having an fc before the softmax??
