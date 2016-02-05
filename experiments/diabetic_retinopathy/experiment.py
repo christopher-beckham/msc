@@ -118,8 +118,35 @@ def get_net(args):
         pool_size=(2,2),
         stride=2
     )
+    # 5x5 here
+
+    # optional, if args["extend"] == True then we will add an extra
+    # convolution in between, since atm 5x5 feature maps are fully-connected
+    # to l_hidden1 and this is relatively more expensive than fully-connecting
+    # a 1x1 set of feature maps
+
+    if "extend" in args:
+        l_dropout_intermediate = lasagne.layers.DropoutLayer(l_pool5, p=0.1)
+        l_conv_intermediate = conv2d(
+            l_dropout_intermediate,
+            num_filters=384,
+            filter_size=(3,3),
+            nonlinearity=leaky_rectify,
+            W=GlorotUniform()
+        )
+
+    if "extend" in args:
+        layer_prev = l_conv_intermediate
+    else:
+        layer_prev = l_pool5
+
+    #
+    #
+    #
+    #
+
     # { "type": "FC", "dropout": 0.5, "num_units": 2048, "pool_size": 2, "nonlinearity": "LReLU" },
-    l_dropout6 = lasagne.layers.DropoutLayer(l_pool5, p=0.5)
+    l_dropout6 = lasagne.layers.DropoutLayer(layer_prev, p=0.5)
     l_hidden1 = lasagne.layers.DenseLayer(
         l_dropout6,
         num_units=2048,
