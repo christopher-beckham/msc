@@ -19,6 +19,9 @@ labels = np.asarray(labels, dtype="int32")
 args["X_train"] = np.asarray([x for x in range(0, len(filenames))], dtype="int32")
 args["y_train"] = labels
 
+args["zmuv"] = True
+args["augment"] = True
+
 """
 part1
 """
@@ -38,7 +41,34 @@ part2
 part3
 """
 
-args["out_model"] = "ilya_net.3.model"
-args["out_stats"] = "ilya_net.3"
-args["in_model"] = "ilya_net.2.model"
+#args["out_model"] = "ilya_net.3.model"
+#args["out_stats"] = "ilya_net.3"
+#args["in_model"] = "ilya_net.2.model"
+#experiment.train(args)
+
+"""
+part4
+- add colour casting
+- add nvcc fast math = true
+thinking of discarding this exp...
+"""
+
+#args["out_model"] = "ilya_net.4cc.model"
+#args["out_stats"] = "ilya_net.4cc"
+#args["in_model"] = "ilya_net.3.model"
+#args["colour_cast"] = True
+#experiment.train(args)
+
+"""
+cc part 1
+"""
+
+#args["out_model"] = "ilya_net_cc.model"
+#args["out_stats"] = "ilya_net_cc"
+#args["colour_cast"] = True
+#experiment.train(args)
+
+args["out_model"] = "ilya_net_cc.2.model"
+args["out_stats"] = "ilya_net_cc.2"
+args["in_model"] = "ilya_net_cc.model"
 experiment.train(args)
