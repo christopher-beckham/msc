@@ -168,10 +168,13 @@ def get_net(args):
         sys.stderr.write("using colour cast augmentation as well...\n")
     zmuv = args["zmuv"]
     augment = args["augment"]
+    image_loader = args["image_loader"]
     kw["batch_iterator_train"] = ImageBatchIterator(
-        batch_size=bs, shuffle=True, filenames=filenames, prefix=prefix, zmuv=zmuv, augment=augment, colour_cast=colour_cast)
+        load_image=image_loader, batch_size=bs, shuffle=True, filenames=filenames, prefix=prefix, zmuv=zmuv,
+        augment=augment, colour_cast=colour_cast)
     kw["batch_iterator_test"] = ImageBatchIterator(
-        batch_size=bs, shuffle=False, filenames=filenames, prefix=prefix, zmuv=zmuv, augment=False, colour_cast=False)
+        load_image=image_loader, batch_size=bs, shuffle=False, filenames=filenames, prefix=prefix, zmuv=zmuv,
+        augment=False, colour_cast=False)
     net = NeuralNet(l_out, **kw)
     return net
     

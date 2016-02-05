@@ -81,23 +81,24 @@ class ShufflingBatchIterator(BatchIterator):
             yield res
 
 class ImageBatchIterator(BatchIterator):
-    def __init__(self, filenames, prefix, zmuv=False, augment=False, colour_cast=False, *args, **kwds):
+    def __init__(self, filenames, prefix, load_image, zmuv=False, augment=False, colour_cast=False, *args, **kwds):
         super(ImageBatchIterator, self).__init__(*args, **kwds)
         self.filenames = filenames
         self.prefix = prefix
         self.zmuv = zmuv
         self.augment = augment
         self.colour_cast = colour_cast
+        self.load_image = load_image # function
     def transform(self, Xb, yb):
         filenames = np.asarray( [ self.filenames[int(x)] for x in Xb.flatten().tolist() ] )
         if self.prefix == "":
             Xb_actual = np.asarray(
-                [ load_image(x, zmuv=self.zmuv, augment=self.augment, colour_cast=self.colour_cast) \
+                [ self.load_image(x, zmuv=self.zmuv, augment=self.augment, colour_cast=self.colour_cast) \
                     for x in filenames ], dtype="float32" 
             )
         else:
             Xb_actual = np.asarray(
-                [ load_image(self.prefix + os.path.sep + x, zmuv=self.zmuv, augment=self.augment, colour_cast=self.colour_cast) \
+                [ self.load_image(self.prefix + os.path.sep + x, zmuv=self.zmuv, augment=self.augment, colour_cast=self.colour_cast) \
                     for x in filenames ], dtype="float32" 
             )
         return Xb_actual, yb
@@ -159,6 +160,31 @@ def np_kappa(yb, yprob):
     pred_expectations = [ int(round(expectation(x))) for x in yprob ]
     #print pred_expectations
     return weighted_kappa(pred_expectations, yb)
+
+def load_image_fast(filename, augment=False, zmuv=False, colour_cast=False):
+    img = io.imread(filename)
+    img = img_as_float(img)
+    if augment:
+        g = random.randint(0, 1)
+        # flippng the img as well could be a bit excessive wrt
+        # computation time so maybe we should stick to rotations
+        if g == 1:
+            # do a random rotation
+            img = rotate(img, random.randint(0,360), cval=0.5)
+    if colour_cast:
+        for j in range(0, img.shape[2]):
+            img[:,:,j] = np.minimum(
+                np.ones(img[:,:,j].shape),
+                img[:,:,j] + (img[:,:,j] * (float(np.random.normal(0, 10)) / 100))
+            )
+    if len(img.shape) == 3 and img.shape[2] == 3:
+        img = np.asarray( [ img[...,0], img[...,1], img[...,2] ] )
+    else:
+        img = np.asarray( [ img ] )
+    if zmuv:
+        for i in range(0, img.shape[0]):
+            img[i, ...] = (img[i, ...] - np.mean(img[i, ...])) / np.std(img[i,...])
+    return img
 
 def load_image(filename, augment=False, zmuv=False, colour_cast=False):
     img = io.imread(filename)
