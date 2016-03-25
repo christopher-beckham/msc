@@ -13,16 +13,46 @@ import random
 from time import time
 
 def get_net(args):
-    pass
+    p = args["p"]
+    l_in = InputLayer( (None, 1, 256, 256) )
+    l_conv1 = Conv2DLayer(
+        l_in, num_filters=32, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+    l_mp1 = MaxPool2DLayer(l_conv1, pool_size=(3,3))
+    #l_drop1 = DropoutLayer(l_mp1, p=p)
+    l_conv2 = Conv2DLayer(
+        l_mp1, num_filters=64, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+    l_mp2 = MaxPool2DLayer(l_conv2, pool_size=(3,3))
+    #l_drop2 = DropoutLayer(l_mp2, p=p)
+    l_conv3 = Conv2DLayer(
+        l_mp2, num_filters=128, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+    #l_drop3 = DropoutLayer(l_conv3, p=p)
+    l_conv4 = Conv2DLayer(
+        l_mp2, num_filters=128, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+    l_mp3 = MaxPool2DLayer(l_conv4, pool_size=(3,3))
+    #l_drop4 = DropoutLayer(l_mp3, p=p)
+    l_conv5 = Conv2DLayer(
+        l_mp3, num_filters=256, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+    #l_drop5 = DropoutLayer(l_conv5, p=p)
+    l_conv6 = Conv2DLayer(
+        l_conv5, num_filters=256, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+    #l_drop6 = DropoutLayer(l_conv6, p=p)
+    l_conv7 = Conv2DLayer(
+        l_conv6, num_filters=512, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+    l_out = l_conv7
+    for layer in get_all_layers(l_out)[::-1]:
+        if isinstance(layer, InputLayer):
+            break
+        l_out = InverseLayer(l_out, layer)
+    sys.stderr.write( "number of params: %i\n" % count_params(l_out) )
+    for layer in get_all_layers(l_out):
+        sys.stderr.write("%s,%s\n" % (layer, layer.output_shape))
+    return l_out
 
 def prepare(args):
 
     X = T.tensor4('X')
 
     l_out = get_net(args)
-    for layer in get_all_layers(l_out):
-        sys.stderr.write( "%s, %s\n" % (layer, layer.output_shape) )
-    sys.stderr.write("number of params: %i\n" % count_params(l_out))
 
     net_out = get_output(l_out, X)
 
@@ -33,8 +63,8 @@ def prepare(args):
         args["num_epochs"], args["batch_size"], args["learning_rate"], args["momentum"]
     updates = nesterov_momentum(loss, params, learning_rate=learning_rate, momentum=momentum)
 
-    train_fn = theano.function([X, y], loss, updates=updates)
-    eval_fn = theano.function([X, y], loss)
+    train_fn = theano.function([X], loss, updates=updates)
+    eval_fn = theano.function([X], loss)
     out_fn = theano.function([X], net_out)
 
     return {
