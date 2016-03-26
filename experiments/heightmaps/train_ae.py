@@ -13,31 +13,29 @@ import random
 from time import time
 
 def get_net(args):
-    p = args["p"]
     l_in = InputLayer( (None, 1, 256, 256) )
+    l_noise = GaussianNoiseLayer(l_in, args["sigma"] if "sigma" in args else 0)
     l_conv1 = Conv2DLayer(
-        l_in, num_filters=32, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+        l_noise, num_filters=32, filter_size=(3,3), nonlinearity=tanh, W=GlorotUniform(gain="relu"))
     l_mp1 = MaxPool2DLayer(l_conv1, pool_size=(3,3))
     #l_drop1 = DropoutLayer(l_mp1, p=p)
     l_conv2 = Conv2DLayer(
-        l_mp1, num_filters=64, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+        l_mp1, num_filters=64, filter_size=(3,3), nonlinearity=tanh, W=GlorotUniform(gain="relu"))
     l_mp2 = MaxPool2DLayer(l_conv2, pool_size=(3,3))
     #l_drop2 = DropoutLayer(l_mp2, p=p)
     l_conv3 = Conv2DLayer(
-        l_mp2, num_filters=128, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+        l_mp2, num_filters=128, filter_size=(3,3), nonlinearity=tanh, W=GlorotUniform(gain="relu"))
     #l_drop3 = DropoutLayer(l_conv3, p=p)
     l_conv4 = Conv2DLayer(
-        l_conv3, num_filters=128, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
-    l_mp3 = MaxPool2DLayer(l_conv4, pool_size=(3,3))
+        l_conv3, num_filters=128, filter_size=(3,3), nonlinearity=tanh, W=GlorotUniform(gain="relu"))
+    #l_mp3 = MaxPool2DLayer(l_conv4, pool_size=(3,3))
     #l_drop4 = DropoutLayer(l_mp3, p=p)
-    l_conv5 = Conv2DLayer(
-        l_mp3, num_filters=256, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+    #l_conv5 = Conv2DLayer(
+    #    l_mp3, num_filters=256, filter_size=(3,3), nonlinearity=tanh, W=GlorotUniform(gain="relu"))
     #l_drop5 = DropoutLayer(l_conv5, p=p)
-    l_conv6 = Conv2DLayer(
-        l_conv5, num_filters=256, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+    #l_conv6 = Conv2DLayer(
+    #    l_conv5, num_filters=256, filter_size=(3,3), nonlinearity=tanh, W=GlorotUniform(gain="relu"))
     #l_drop6 = DropoutLayer(l_conv6, p=p)
-    l_conv7 = Conv2DLayer(
-        l_conv6, num_filters=512, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
     l_out = l_conv4
     for layer in get_all_layers(l_out)[::-1]:
         if isinstance(layer, InputLayer):

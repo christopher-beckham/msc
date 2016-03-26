@@ -19,7 +19,8 @@ if __name__ == '__main__':
     np.random.seed(0)
     random.seed(0)
 
-    x_filename = os.environ["DATA_DIR"] + "/train/train_data.npy"
+    #x_filename = os.environ["DATA_DIR"] + "/train/train_data.npy"
+    x_filename = "train_data_minimal.npy"
     X_train = np.load(x_filename).astype("float32")
 
     #X_train_fake = np.random.normal(0, 1, size=(10, 1, 256, 256))
@@ -28,8 +29,8 @@ if __name__ == '__main__':
     args = dict()
     args["X_train"] = X_train
     args["num_epochs"] = 10
-    args["learning_rate"] = 0.01
-    args["batch_size"] = 128
+    args["learning_rate"] = 0.0001
+    args["batch_size"] = 10
     args["momentum"] = 0.9
     args["p"] = 0
 
@@ -37,4 +38,4 @@ if __name__ == '__main__':
 
     print "saving model..."
     with open("model.pkl","wb") as f:
-	pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
+	   pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
