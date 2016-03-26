@@ -76,7 +76,7 @@ def prepare(args):
 
 def train(args):
     symbols = prepare(args)
-    train_fn, eval_fn, out_fn = symbols["train_fn"], symbols["eval_fn"], symbols["out_fn"]
+    train_fn, eval_fn, out_fn, l_out = symbols["train_fn"], symbols["eval_fn"], symbols["out_fn"], symbols["l_out"]
     X_train = args["X_train"]
     num_epochs, bs = args["num_epochs"], args["batch_size"]
 
@@ -97,3 +97,5 @@ def train(args):
             this_losses.append(this_loss)
             b += 1
         print "%f,%f" % (np.mean(this_losses), time()-t0)
+
+    return get_all_param_values(l_out)
