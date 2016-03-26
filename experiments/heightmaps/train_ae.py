@@ -27,7 +27,7 @@ def get_net(args):
         l_mp2, num_filters=128, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
     #l_drop3 = DropoutLayer(l_conv3, p=p)
     l_conv4 = Conv2DLayer(
-        l_mp2, num_filters=128, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
+        l_conv3, num_filters=128, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
     l_mp3 = MaxPool2DLayer(l_conv4, pool_size=(3,3))
     #l_drop4 = DropoutLayer(l_mp3, p=p)
     l_conv5 = Conv2DLayer(
@@ -38,11 +38,12 @@ def get_net(args):
     #l_drop6 = DropoutLayer(l_conv6, p=p)
     l_conv7 = Conv2DLayer(
         l_conv6, num_filters=512, filter_size=(3,3), nonlinearity=leaky_rectify, W=GlorotUniform(gain="relu"))
-    l_out = l_conv7
+    l_out = l_conv4
     for layer in get_all_layers(l_out)[::-1]:
         if isinstance(layer, InputLayer):
             break
         l_out = InverseLayer(l_out, layer)
+    l_out = NonlinearityLayer(l_out, nonlinearity=sigmoid)
     sys.stderr.write( "number of params: %i\n" % count_params(l_out) )
     for layer in get_all_layers(l_out):
         sys.stderr.write("%s,%s\n" % (layer, layer.output_shape))
