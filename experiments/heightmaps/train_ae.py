@@ -81,7 +81,7 @@ def train(args):
 
     train_idxs = [x for x in range(0, X_train.shape[0])]
 
-    print "train_loss,time"
+    print "epoch,train_loss,time"
     for epoch in range(0, num_epochs):
         random.shuffle(train_idxs)
         X_train = X_train[train_idxs]
@@ -95,6 +95,6 @@ def train(args):
             this_loss = train_fn(X_batch)
             this_losses.append(this_loss)
             b += 1
-        print "%f,%f" % (np.mean(this_losses), time()-t0)
+        print "%i,%f,%f" % (epoch+1, np.mean(this_losses), time()-t0)
 
     return get_all_param_values(l_out)

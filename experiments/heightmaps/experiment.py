@@ -29,7 +29,7 @@ if __name__ == '__main__':
 
     args = dict()
     args["X_train"] = X_train
-    args["num_epochs"] = 200
+    args["num_epochs"] = 2500
     args["learning_rate"] = 0.01
     args["batch_size"] = 10
     args["momentum"] = 0.9
