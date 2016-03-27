@@ -17,11 +17,11 @@ def get_net(args):
     l_noise = GaussianNoiseLayer(l_in, args["sigma"] if "sigma" in args else 0)
     l_conv1 = Conv2DLayer(
         l_noise, num_filters=32, filter_size=(3,3), nonlinearity=tanh, W=GlorotUniform(gain="relu"))
-    l_mp1 = MaxPool2DLayer(l_conv1, pool_size=(3,3))
+    l_mp1 = MaxPool2DLayer(l_conv1, pool_size=(2,2))
     #l_drop1 = DropoutLayer(l_mp1, p=p)
     l_conv2 = Conv2DLayer(
         l_mp1, num_filters=64, filter_size=(3,3), nonlinearity=tanh, W=GlorotUniform(gain="relu"))
-    l_mp2 = MaxPool2DLayer(l_conv2, pool_size=(3,3))
+    l_mp2 = MaxPool2DLayer(l_conv2, pool_size=(2,2))
     #l_drop2 = DropoutLayer(l_mp2, p=p)
     l_conv3 = Conv2DLayer(
         l_mp2, num_filters=128, filter_size=(3,3), nonlinearity=tanh, W=GlorotUniform(gain="relu"))

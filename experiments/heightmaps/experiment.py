@@ -13,6 +13,7 @@ from lasagne.updates import *
 import random
 from time import time
 import train_ae
+import cPickle as pickle
 
 if __name__ == '__main__':
 
@@ -28,8 +29,8 @@ if __name__ == '__main__':
 
     args = dict()
     args["X_train"] = X_train
-    args["num_epochs"] = 10
-    args["learning_rate"] = 0.0001
+    args["num_epochs"] = 200
+    args["learning_rate"] = 0.01
     args["batch_size"] = 10
     args["momentum"] = 0.9
     args["p"] = 0
