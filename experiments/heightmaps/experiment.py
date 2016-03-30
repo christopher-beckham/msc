@@ -52,10 +52,28 @@ def exp2():
     args["config"] = "basic2.py"
     train_ae.train(args)
 
+def exp3():
+    out_pkl = sys.argv[1]
+    x_filename = os.environ["DATA_DIR"] + "/train/train_data.npy"
+    X_train = np.load(x_filename).astype("float32")
+    sys.stderr.write("X_train shape: %s\n" % str(X_train.shape))
+    args = dict()
+    args["X_train"] = X_train
+    args["num_epochs"] = 30
+    args["learning_rate"] = 0.01
+    sys.stderr.write("for exp2 using batch size of 32 instead of 128...\n")
+    args["batch_size"] = 64
+    args["momentum"] = 0.9
+    args["out_pkl"] = out_pkl
+    #args["in_pkl"] =
+    args["config"] = "basic_avg_pool.py"
+    train_ae.train(args)
+
 if __name__ == '__main__':
 
     np.random.seed(0)
     random.seed(0)
 
     #exp1()
-    exp2()
+    #exp2()
+    exp3()
