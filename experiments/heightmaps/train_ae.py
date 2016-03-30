@@ -12,7 +12,6 @@ from lasagne.updates import *
 import random
 from time import time
 import cPickle as pickle
-import imp
 
 def prepare(args):
 
@@ -21,6 +20,10 @@ def prepare(args):
     config = imp.load_source("config", args["config"])
     l_out = config.get_net(args)
     net_out = get_output(l_out, X, deterministic=True)
+    if "in_pkl" in args:
+        with open(args["in_pkl"]) as f:
+            set_all_param_values(l_out, pickle.load(f))
+            sys.stderr.write("loading existing model at %s\n" % args["in_pkl"])
 
     loss = squared_error(net_out, X).mean()
     params = get_all_params(l_out, trainable=True)
