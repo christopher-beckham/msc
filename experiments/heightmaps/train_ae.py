@@ -12,6 +12,7 @@ from lasagne.updates import *
 import random
 from time import time
 import cPickle as pickle
+import imp
 
 def prepare(args):
 

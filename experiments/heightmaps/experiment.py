@@ -44,7 +44,8 @@ def exp2():
     #args["rmsprop"] = True
     args["num_epochs"] = 30
     args["learning_rate"] = 0.01
-    args["batch_size"] = 128
+    sys.stderr.write("for exp2 using batch size of 32 instead of 128...\n")
+    args["batch_size"] = 32
     args["momentum"] = 0.9
     args["out_pkl"] = out_pkl
     #args["in_pkl"] =
