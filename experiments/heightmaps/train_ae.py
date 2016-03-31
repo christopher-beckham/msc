@@ -59,7 +59,8 @@ def train(args):
     print "epoch,train_loss,has_train_loss_improved,time"
     for epoch in range(0, num_epochs):
         random.shuffle(train_idxs)
-        X_train = X_train[train_idxs]
+        #X_train = X_train[train_idxs]
+        np.random.shuffle(X_train)
         t0 = time()
         this_losses = []
         b = 0
