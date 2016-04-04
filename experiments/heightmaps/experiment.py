@@ -59,7 +59,7 @@ def exp3():
     sys.stderr.write("X_train shape: %s\n" % str(X_train.shape))
     args = dict()
     args["X_train"] = X_train
-    args["num_epochs"] = 30
+    args["num_epochs"] = 50
     args["learning_rate"] = 0.01
     sys.stderr.write("for exp2 using batch size of 64 instead of 128...\n")
     args["batch_size"] = 64
@@ -76,13 +76,13 @@ def exp4():
     sys.stderr.write("X_train shape: %s\n" % str(X_train.shape))
     args = dict()
     args["X_train"] = X_train
-    args["num_epochs"] = 50
+    args["num_epochs"] = 100
     args["learning_rate"] = 0.01
-    sys.stderr.write("for exp2 using batch size of 64 instead of 128...\n")
+    #sys.stderr.write("for exp2 using batch size of 64 instead of 128...\n")
     args["batch_size"] = 64
     args["momentum"] = 0.9
     args["out_pkl"] = out_pkl
-    #args["in_pkl"] =
+    args["in_pkl"] = "output/vgg_a_subset.pkl"
     args["config"] = "vgg_a_subset.py"
     train_ae.train(args)
 
