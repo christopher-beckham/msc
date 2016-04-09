@@ -46,7 +46,8 @@ def get_net(args):
             "l_conv3": l_conv3,
             "l_conv4": l_conv4,
             "l_conv5": l_conv5
-        }
+        },
+        "use_rgb":False
     }
 
 if __name__ == "__main__":

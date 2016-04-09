@@ -3,6 +3,12 @@ Original code at: https://github.com/Lasagne/Recipes/blob/master/examples/stylet
 Original authors: ebenolson, webeng
 """
 
+import os
+import matplotlib
+if os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
+    matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
 import lasagne
 import numpy as np
 import pickle
@@ -17,9 +23,13 @@ from time import time
 from lasagne.layers import *
 import sys
 sys.path.append("../../modules/")
-import matplotlib.pyplot as plt
+import os
 import imp
 import argparse
+
+#plt.subplot(2,1,1)
+#plt.plot([1,2,3])
+#plt.savefig("/tmp/stuff.png")
 
 def gram_matrix(x):
     x = x.flatten(ndim=3)
@@ -99,6 +109,10 @@ layers = net_raw["target_layers"]
 print "target layers:", layers
 
 heightmap = np.load(NPY_FILE)[REF_IMAGE_INDEX:REF_IMAGE_INDEX+1]
+if net_raw["use_rgb"]:
+    # we have to make this (1,3,256,256) instead of (1,1,256,256)
+    heightmap = np.asarray( [ [ heightmap[0,0,:,:], heightmap[0,0,:,:], heightmap[0,0,:,:] ] ] )
+    print heightmap.shape
 photo = heightmap
 
 # -----
@@ -107,7 +121,7 @@ input_im_theano = T.tensor4()
 outputs = lasagne.layers.get_output(layers.values(), input_im_theano)
 art_features = {k: theano.shared(output.eval({input_im_theano: photo}))
                 for k, output in zip(layers.keys(), outputs)}
-generated_image = theano.shared(floatX(np.random.uniform(0, 1, photo.shape)))
+generated_image = theano.shared( np.random.uniform(0, 1, photo.shape).astype( theano.config.floatX  ) )
 gen_features = lasagne.layers.get_output(layers.values(), generated_image)
 gen_features = {k: v for k, v in zip(layers.keys(), gen_features)}
 
@@ -131,24 +145,24 @@ f_grad = theano.function([], grad)
 def eval_loss(x0):
     x0 = floatX(x0.reshape(photo.shape))
     generated_image.set_value(x0)
-    return f_loss().astype('float64')
+    return f_loss().astype( theano.config.floatX )
 
 def eval_grad(x0):
     x0 = floatX(x0.reshape(photo.shape))
     generated_image.set_value(x0)
-    return np.array(f_grad()).flatten().astype('float64')
+    return np.array(f_grad()).flatten().astype( theano.config.floatX )
 
 for iter_ in range(0, NUM_IMAGES):
     print "image #: %i" % (iter_+1)
     t0 = time()
-    generated_image.set_value(floatX(np.random.uniform(0, 1, photo.shape)))
-    x0 = generated_image.get_value().astype('float64')
+    generated_image.set_value( np.random.uniform(0, 1, photo.shape).astype(  theano.config.floatX  ) )
+    x0 = generated_image.get_value().astype( theano.config.floatX )
     xs = []
     xs.append(x0)
     for i in range(0, NUM_ITERS):
         print "  iter #: %i" % (i+1)
         scipy.optimize.fmin_l_bfgs_b(eval_loss, x0.flatten(), fprime=eval_grad, maxfun=40)
-        x0 = generated_image.get_value().astype('float64')
+        x0 = generated_image.get_value().astype( theano.config.floatX )
         xs.append(x0)
     # generate grid image
     cc = 1
@@ -160,5 +174,5 @@ for iter_ in range(0, NUM_IMAGES):
             cc += 1
     plt.savefig(OUT_FOLDER + "/%i_evolution.png" % t0)
     # save final heightmap
-    imsave(out_folder + "/%i.png" % t0, arr=xs[-1][0][0])
+    imsave(OUT_FOLDER + "/%i.png" % t0, arr=xs[-1][0][0])
 

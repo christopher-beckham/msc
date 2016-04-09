@@ -10,7 +10,9 @@ from lasagne.objectives import *
 from lasagne.updates import *
 import cPickle as pickle
 # --
-from lasagne.layers.dnn import Conv2DDNNLayer as ConvLayer
+#from lasagne.layers.dnn import Conv2DDNNLayer as ConvLayer
+#from lasagne.layers import Pool2DLayer as PoolLayer
+from lasagne.layers import Conv2DLayer as ConvLayer
 from lasagne.layers import Pool2DLayer as PoolLayer
 
 def get_net(args):
