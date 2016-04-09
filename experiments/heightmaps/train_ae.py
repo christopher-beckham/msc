@@ -50,13 +50,16 @@ def prepare(args):
 def train(args):
     symbols = prepare(args)
     train_fn, eval_fn, out_fn, l_out = symbols["train_fn"], symbols["eval_fn"], symbols["out_fn"], symbols["l_out"]
-    X_train = args["X_train"]
+    X_all = args["X_all"]
+    X_train = X_all[0 : 0.9*X_all.shape[0]]
+    X_valid = X_all[0.9*X_all.shape[0] ::]
+
     num_epochs, bs = args["num_epochs"], args["batch_size"]
 
     train_idxs = [x for x in range(0, X_train.shape[0])]
 
-    best_train_loss = float('inf')
-    print "epoch,train_loss,has_train_loss_improved,time"
+    best_valid_loss = float('inf')
+    print "epoch,train_loss,has_valid_loss_improved,time"
     for epoch in range(0, num_epochs):
         random.shuffle(train_idxs)
         #X_train = X_train[train_idxs]
@@ -72,12 +75,15 @@ def train(args):
             this_losses.append(this_loss)
             b += 1
         avg_train_loss = np.mean(this_losses)
-        if avg_train_loss < best_train_loss:
-            best_train_loss = avg_train_loss
-            best_train_loss_ind = 1
+        valid_loss = eval_fn(X_valid)
+        if valid_loss < best_valid_loss:
+            best_valid_loss = valid_loss
+            best_valid_loss_ind = 1
             best_model = lasagne.layers.get_all_param_values(l_out)
             with open(args["out_pkl"], "wb") as f:
                 pickle.dump(best_model, f, pickle.HIGHEST_PROTOCOL)
         else:
-            best_train_loss_ind = 0
-        print "%i,%f,%i,%f" % (epoch+1, avg_train_loss, best_train_loss_ind, time()-t0)
+            best_valid_loss_ind = 0
+        print "%i,%f,%i,%f" % (epoch+1, avg_train_loss, best_valid_loss_ind, time()-t0)
+
+
