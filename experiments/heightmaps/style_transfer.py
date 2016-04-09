@@ -44,34 +44,59 @@ def total_variation_loss(x):
 
 # -----
 
+# defaults
+"""
+CONFIG_NAME = "vgg_a_subset.py"
+MODEL_NAME = "output/vgg_a_subset.2.pkl"
+NPY_FILE = "train_data_minimal.npy"
+REF_IMAGE_INDEX = 5
+STYLE_COEF = 1e7
+VARIATION_COEF = 0.001
+NUM_IMAGES = 1
+NUM_ITERS = 6
+OUT_FOLDER = "output_neat"
+LAYERS = "conv4_2,conv1_1,conv2_1,conv3_1,conv4_1,conv5_1".split(",")
+"""
+
 parser = argparse.ArgumentParser(description="style transfer")
 parser.add_argument("--config_name", dest="config_name", help="name of model config file")
 parser.add_argument("--model_name", dest="model_name", help="name of model file")
 parser.add_argument("--npy_file", dest="npy_file", help="name of npy train file (to get reference image)")
-parser.add_argument("--ref_image_index", dest="ref_image_index", help="index of ref image")
+parser.add_argument("--ref_image_index", type=int, dest="ref_image_index", help="index of ref image")
 parser.add_argument("--style_coef", dest="style_coef", type=float, help="style coef")
-parser.add_argument("--variation_coef", dest="varation_coef", type=float, help="variation coef")
+parser.add_argument("--variation_coef", dest="variation_coef", type=float, help="variation coef")
 parser.add_argument("--num_images", dest="num_images", type=int, help="number of images to generate")
 parser.add_argument("--num_iters", dest="num_iters", type=int, help="number of l-bfgs iters")
 parser.add_argument("--out_folder", dest="out_folder", help="variation coef")
+args = parser.parse_args()
+
+CONFIG_NAME = args.config_name
+MODEL_NAME = args.model_name
+NPY_FILE = args.npy_file
+REF_IMAGE_INDEX = args.ref_image_index
+STYLE_COEF = args.style_coef
+VARIATION_COEF = args.variation_coef
+NUM_IMAGES = args.num_images
+NUM_ITERS = args.num_iters
+OUT_FOLDER = args.out_folder
+
+if NUM_ITERS < 6:
+    print "error: num iters must be >= 6!"
+    sys.exit(1)
 
 # -----
 
-CONFIG_NAME = "vgg_a_subset.py"
 config = imp.load_source("cfg", CONFIG_NAME)
 net_raw = config.get_net({})
 
-MODEL_NAME = "output/vgg_a_subset.2.pkl"
 with open(MODEL_NAME) as f:
-    set_all_param_values(net_raw, pickle.load(f))
-layers = {}
-for layer in get_all_layers(net_raw):
-    if isinstance(layer, Conv2DLayer):
-        layers[ str(layer) ] = layer
-print "Conv layers detected:", layers
-
-NPY_FILE = "train_data_minimal.npy"
-REF_IMAGE_INDEX = 5
+    dat = pickle.load(f)
+    try:
+        set_all_param_values(net_raw["l_out"], dat)
+    except Exception as e:
+        set_all_param_values(net_raw["l_out"], dat["param values"])
+layers = net_raw["target_layers"]
+print "target layers:", layers
 
 heightmap = np.load(NPY_FILE)[REF_IMAGE_INDEX:REF_IMAGE_INDEX+1]
 photo = heightmap
@@ -87,8 +112,6 @@ gen_features = lasagne.layers.get_output(layers.values(), generated_image)
 gen_features = {k: v for k, v in zip(layers.keys(), gen_features)}
 
 losses = []
-STYLE_COEF = 1e7
-VARIATION_COEF = 0.001
 # style loss
 for key in layers:
     losses.append(STYLE_COEF*style_loss(art_features, gen_features, key))
@@ -115,16 +138,15 @@ def eval_grad(x0):
     generated_image.set_value(x0)
     return np.array(f_grad()).flatten().astype('float64')
 
-NUM_IMAGES = 1
-NUM_ITERS = 6
-OUT_FOLDER = "output_neat"
-for iter_ in range(0, NUM_IMAGES):   
+for iter_ in range(0, NUM_IMAGES):
+    print "image #: %i" % (iter_+1)
     t0 = time()
     generated_image.set_value(floatX(np.random.uniform(0, 1, photo.shape)))
     x0 = generated_image.get_value().astype('float64')
     xs = []
     xs.append(x0)
     for i in range(0, NUM_ITERS):
+        print "  iter #: %i" % (i+1)
         scipy.optimize.fmin_l_bfgs_b(eval_loss, x0.flatten(), fprime=eval_grad, maxfun=40)
         x0 = generated_image.get_value().astype('float64')
         xs.append(x0)
@@ -138,5 +160,5 @@ for iter_ in range(0, NUM_IMAGES):
             cc += 1
     plt.savefig(OUT_FOLDER + "/%i_evolution.png" % t0)
     # save final heightmap
-    imsave(OUT_FOLDER + "/%i.png" % t0, arr=xs[-1][0][0])
+    imsave(out_folder + "/%i.png" % t0, arr=xs[-1][0][0])
 

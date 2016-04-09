@@ -39,7 +39,15 @@ def get_net(args):
     sys.stderr.write( "number of params: %i\n" % count_params(l_out) )
     for layer in get_all_layers(l_out):
         sys.stderr.write("%s,%s\n" % (layer, layer.output_shape))
-    return l_out
+    return {
+        "l_out": l_out,
+        "target_layers": {
+            "l_conv1": l_conv1,
+            "l_conv3": l_conv3,
+            "l_conv4": l_conv4,
+            "l_conv5": l_conv5
+        }
+    }
 
 if __name__ == "__main__":
     print "debugging..."
