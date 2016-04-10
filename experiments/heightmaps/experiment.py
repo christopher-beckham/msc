@@ -99,7 +99,7 @@ def exp5():
     args["batch_size"] = 64
     args["momentum"] = 0.9
     args["out_pkl"] = out_pkl
-    args["config"] = "vgg_a_subset.py"
+    args["config"] = "configurations/vgg_a_subset.py"
     train_ae.train(args)
 
 if __name__ == '__main__':

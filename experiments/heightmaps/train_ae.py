@@ -19,7 +19,7 @@ def prepare(args):
     X = T.tensor4('X')
 
     config = imp.load_source("config", args["config"])
-    l_out = config.get_net(args)
+    l_out = config.get_net(args)["l_out"]
     net_out = get_output(l_out, X, deterministic=True)
     if "in_pkl" in args:
         with open(args["in_pkl"]) as f:
@@ -51,8 +51,10 @@ def train(args):
     symbols = prepare(args)
     train_fn, eval_fn, out_fn, l_out = symbols["train_fn"], symbols["eval_fn"], symbols["out_fn"], symbols["l_out"]
     X_all = args["X_all"]
+    np.random.shuffle(X_all)
     X_train = X_all[0 : 0.9*X_all.shape[0]]
     X_valid = X_all[0.9*X_all.shape[0] ::]
+    sys.stderr.write("X_train and X_valid shape: %s, %s\n" % (X_train.shape, X_valid.shape))
 
     num_epochs, bs = args["num_epochs"], args["batch_size"]
 
@@ -65,9 +67,11 @@ def train(args):
         #X_train = X_train[train_idxs]
         np.random.shuffle(X_train)
         t0 = time()
-        this_losses = []
+        
+	# train loss
+	this_losses = []
         b = 0
-        while True:
+	while True:
             if b*bs >= X_train.shape[0]:
                 break
             X_batch = X_train[b*bs : (b+1)*bs]
@@ -75,15 +79,26 @@ def train(args):
             this_losses.append(this_loss)
             b += 1
         avg_train_loss = np.mean(this_losses)
-        valid_loss = eval_fn(X_valid)
-        if valid_loss < best_valid_loss:
-            best_valid_loss = valid_loss
+        
+	this_valid_losses = []
+        b = 0
+        while True:
+           if b*bs >= X_valid.shape[0]:
+                break
+           X_valid_batch = X_valid[b*bs:(b+1)*bs]
+           this_valid_loss = eval_fn(X_valid_batch)
+           this_valid_losses.append(this_valid_loss)
+           b += 1
+
+        avg_valid_loss = np.mean(this_valid_losses)
+        if avg_valid_loss < best_valid_loss:
+            best_valid_loss = avg_valid_loss
             best_valid_loss_ind = 1
             best_model = lasagne.layers.get_all_param_values(l_out)
             with open(args["out_pkl"], "wb") as f:
                 pickle.dump(best_model, f, pickle.HIGHEST_PROTOCOL)
         else:
             best_valid_loss_ind = 0
-        print "%i,%f,%i,%f" % (epoch+1, avg_train_loss, best_valid_loss_ind, time()-t0)
+        print "%i,%f,%f,%i,%f" % (epoch+1, avg_train_loss, avg_valid_loss, best_valid_loss_ind, time()-t0)
 
 
