@@ -18,18 +18,23 @@ This architecture is a subset of VGGNet A:
 http://arxiv.org/pdf/1409.1556.pdf
 """
 def get_net(args):
+    if "relu" in args:
+        nonlinearity=rectify
+        sys.stderr.write("using relu\n")
+    else:
+        nonlinearity=tanh
     l_in = InputLayer( (None, 1, 256, 256) )
     l_noise = GaussianNoiseLayer(l_in, args["sigma"] if "sigma" in args else 0)
     l_conv1 = Conv2DLayer(
-        l_noise, num_filters=64, filter_size=(3,3), nonlinearity=tanh)
+        l_noise, num_filters=64, filter_size=(3,3), nonlinearity=nonlinearity)
     l_mp1 = MaxPool2DLayer(l_conv1, pool_size=(2,2))
     l_conv3 = Conv2DLayer(
-        l_mp1, num_filters=128, filter_size=(3,3), nonlinearity=tanh)
+        l_mp1, num_filters=128, filter_size=(3,3), nonlinearity=nonlinearity)
     l_mp2 = MaxPool2DLayer(l_conv3, pool_size=(2,2))
     l_conv4 = Conv2DLayer(
-        l_mp2, num_filters=256, filter_size=(3,3), nonlinearity=tanh)
+        l_mp2, num_filters=256, filter_size=(3,3), nonlinearity=nonlinearity)
     l_conv5 = Conv2DLayer(
-        l_conv4, num_filters=256, filter_size=(3,3), nonlinearity=tanh)
+        l_conv4, num_filters=256, filter_size=(3,3), nonlinearity=nonlinearity)
     l_out = l_conv5
     for layer in get_all_layers(l_out)[::-1]:
         if isinstance(layer, InputLayer):

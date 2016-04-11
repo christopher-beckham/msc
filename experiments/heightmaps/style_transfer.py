@@ -163,6 +163,8 @@ for iter_ in range(0, NUM_IMAGES):
         print "  iter #: %i" % (i+1)
         scipy.optimize.fmin_l_bfgs_b(eval_loss, x0.flatten(), fprime=eval_grad, maxfun=40)
         x0 = generated_image.get_value().astype( theano.config.floatX )
+        # scale between 0 and 1, grrr
+        x0 = (x0 - np.min(x0)) / (np.max(x0) - np.min(x0))
         xs.append(x0)
     # generate grid image
     cc = 1

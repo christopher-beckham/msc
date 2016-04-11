@@ -34,7 +34,7 @@ def get_net(args):
     l_conv6 = Conv2DLayer(
         l_mp3, num_filters=512, filter_size=(3,3), nonlinearity=tanh)
     l_conv7 = Conv2DLayer(
-        l_Conv6, num_filters=512, filter_size=(3,3), nonlinearity=tanh)
+        l_conv6, num_filters=512, filter_size=(3,3), nonlinearity=tanh)
     l_out = l_conv7
     for layer in get_all_layers(l_out)[::-1]:
         if isinstance(layer, InputLayer):
