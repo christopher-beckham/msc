@@ -29,7 +29,8 @@ def prepare(args):
     loss = squared_error(net_out, X).mean()
     params = get_all_params(l_out, trainable=True)
     grads = T.grad(loss, params)
-    grads = total_norm_constraint(grads, args["norm_constraint"])
+    if "norm_constraint" in args:
+        grads = total_norm_constraint(grads, args["norm_constraint"])
 
     num_epochs, batch_size, learning_rate, momentum = \
         args["num_epochs"], args["batch_size"], args["learning_rate"], args["momentum"]
@@ -38,9 +39,6 @@ def prepare(args):
     else:
         updates = nesterov_momentum(grads, params, learning_rate=learning_rate, momentum=momentum)
 
-    if "norm_constraint" in args:
-        sys.stderr.write("using norm constraint = %i\n" % args["norm_constraint"])
-        updates = norm_constraint(updates, args["norm_constraint"])
 
     train_fn = theano.function([X], loss, updates=updates)
     eval_fn = theano.function([X], loss)

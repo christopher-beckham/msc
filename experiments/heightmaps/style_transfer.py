@@ -18,6 +18,7 @@ import theano.tensor as T
 from lasagne.utils import floatX
 from skimage.io import imread, imsave
 from skimage import filters
+from skimage.filters import gaussian_filter
 import train_ae
 from time import time
 from lasagne.layers import *
@@ -78,6 +79,8 @@ parser.add_argument("--variation_coef", dest="variation_coef", type=float, help=
 parser.add_argument("--num_images", dest="num_images", type=int, help="number of images to generate")
 parser.add_argument("--num_iters", dest="num_iters", type=int, help="number of l-bfgs iters")
 parser.add_argument("--out_folder", dest="out_folder", help="variation coef")
+parser.add_argument("--grid", dest="grid", help="plot a grid?")
+parser.add_argument("--sigma", dest="sigma", help="sigma for if we gauss blur the white noise image")
 args = parser.parse_args()
 
 CONFIG_NAME = args.config_name
@@ -155,7 +158,11 @@ def eval_grad(x0):
 for iter_ in range(0, NUM_IMAGES):
     print "image #: %i" % (iter_+1)
     t0 = time()
-    generated_image.set_value( np.random.uniform(0, 1, photo.shape).astype(  theano.config.floatX  ) )
+    white_noise = np.random.uniform(0, 1, photo.shape).astype(  theano.config.floatX  )
+    if args.sigma > 0:
+        white_noise = gaussian_filter(white_noise[0][0], sigma=args.sigma).reshape(photo.shape)
+        sys.stderr.write("adding gaussian noise\n")
+    generated_image.set_value(white_noise)
     x0 = generated_image.get_value().astype( theano.config.floatX )
     xs = []
     xs.append(x0)
@@ -167,14 +174,15 @@ for iter_ in range(0, NUM_IMAGES):
         x0 = (x0 - np.min(x0)) / (np.max(x0) - np.min(x0))
         xs.append(x0)
     # generate grid image
-    cc = 1
-    nrow, ncol = 2, 3
-    for i in range(0, nrow):
-        for j in range(0, ncol):
-            plt.subplot(nrow, ncol, cc)
-            plt.imshow(xs[cc-1][0][0], cmap="gray")
-            cc += 1
-    plt.savefig(OUT_FOLDER + "/%i_evolution.png" % t0)
+    if args.grid != "no":
+        cc = 1
+        nrow, ncol = 2, 3
+        for i in range(0, nrow):
+            for j in range(0, ncol):
+                plt.subplot(nrow, ncol, cc)
+                plt.imshow(xs[cc-1][0][0], cmap="gray")
+                cc += 1
+        plt.savefig(OUT_FOLDER + "/%i_evolution.png" % t0)
     # save final heightmap
     imsave(OUT_FOLDER + "/%i.png" % t0, arr=xs[-1][0][0])
 
