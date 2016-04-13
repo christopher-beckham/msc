@@ -28,14 +28,15 @@ def prepare(args):
 
     loss = squared_error(net_out, X).mean()
     params = get_all_params(l_out, trainable=True)
-    #grads = T.grad(loss, params)
+    grads = T.grad(loss, params)
+    grads = total_norm_constraint(grads, args["norm_constraint"])
 
     num_epochs, batch_size, learning_rate, momentum = \
         args["num_epochs"], args["batch_size"], args["learning_rate"], args["momentum"]
     if "rmsprop" in args:
-        updates = rmsprop(loss, params, learning_rate=learning_rate)
+        updates = rmsprop(grads, params, learning_rate=learning_rate)
     else:
-        updates = nesterov_momentum(loss, params, learning_rate=learning_rate, momentum=momentum)
+        updates = nesterov_momentum(grads, params, learning_rate=learning_rate, momentum=momentum)
 
     if "norm_constraint" in args:
         sys.stderr.write("using norm constraint = %i\n" % args["norm_constraint"])
@@ -74,37 +75,37 @@ def train(args):
         np.random.shuffle(X_train)
         t0 = time()
         
-    # train loss
-    this_losses = []
-    b = 0
-    while True:
-        if b*bs >= X_train.shape[0]:
-            break
-        X_batch = X_train[b*bs : (b+1)*bs]
-        this_loss = train_fn(X_batch)
-        this_losses.append(this_loss)
-        b += 1
-    avg_train_loss = np.mean(this_losses)
-        
-    this_valid_losses = []
-    b = 0
-    while True:
-       if b*bs >= X_valid.shape[0]:
-            break
-       X_valid_batch = X_valid[b*bs:(b+1)*bs]
-       this_valid_loss = eval_fn(X_valid_batch)
-       this_valid_losses.append(this_valid_loss)
-       b += 1
+        # train loss
+        this_losses = []
+        b = 0
+        while True:
+            if b*bs >= X_train.shape[0]:
+                break
+            X_batch = X_train[b*bs : (b+1)*bs]
+            this_loss = train_fn(X_batch)
+            this_losses.append(this_loss)
+            b += 1
+        avg_train_loss = np.mean(this_losses)
+            
+        this_valid_losses = []
+        b = 0
+        while True:
+           if b*bs >= X_valid.shape[0]:
+                break
+           X_valid_batch = X_valid[b*bs:(b+1)*bs]
+           this_valid_loss = eval_fn(X_valid_batch)
+           this_valid_losses.append(this_valid_loss)
+           b += 1
 
-    avg_valid_loss = np.mean(this_valid_losses)
-    if avg_valid_loss < best_valid_loss:
-        best_valid_loss = avg_valid_loss
-        best_valid_loss_ind = 1
-        best_model = lasagne.layers.get_all_param_values(l_out)
-        with open(args["out_pkl"], "wb") as f:
-            pickle.dump(best_model, f, pickle.HIGHEST_PROTOCOL)
-    else:
-        best_valid_loss_ind = 0
-    print "%i,%f,%f,%i,%f" % (epoch+1, avg_train_loss, avg_valid_loss, best_valid_loss_ind, time()-t0)
+        avg_valid_loss = np.mean(this_valid_losses)
+        if avg_valid_loss < best_valid_loss:
+            best_valid_loss = avg_valid_loss
+            best_valid_loss_ind = 1
+            best_model = lasagne.layers.get_all_param_values(l_out)
+            with open(args["out_pkl"], "wb") as f:
+                pickle.dump(best_model, f, pickle.HIGHEST_PROTOCOL)
+        else:
+            best_valid_loss_ind = 0
+        print "%i,%f,%f,%i,%f" % (epoch+1, avg_train_loss, avg_valid_loss, best_valid_loss_ind, time()-t0)
 
 
