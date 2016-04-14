@@ -1,4 +1,4 @@
-epoch,train_loss,has_valid_loss_improved,time
+epoch,train_loss,valid_loss,has_valid_loss_improved,time
 1,0.071661,0.071391,1,523.194971
 2,0.071635,0.071372,1,523.734942
 3,0.071607,0.071348,1,523.666621

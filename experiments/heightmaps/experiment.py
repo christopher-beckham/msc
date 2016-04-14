@@ -171,15 +171,35 @@ def exp10():
     out_pkl = sys.argv[1]
     x_filename = os.environ["DATA_DIR"] + "/train/train_data.npy"
     X_all = np.load(x_filename).astype("float32")
+    X_train = X_all[0 : 0.9*X_all.shape[0]]
+    X_valid = X_all[0.9*X_all.shape[0] ::]
     sys.stderr.write("X_all shape: %s\n" % str(X_all.shape))
     args = dict()
-    args["X_all"] = X_all
+    args["X_train"] = X_train
+    args["X_valid"] = X_valid
     args["num_epochs"] = 100
     args["learning_rate"] = 0.01
     args["batch_size"] = 48
     args["momentum"] = 0.9
     args["out_pkl"] = out_pkl
     args["config"] = "configurations/vgg_a.py"
+    train_ae.train(args)
+
+def exp8_only_one_example():
+    out_pkl = sys.argv[1]
+    x_filename = os.environ["DATA_DIR"] + "/train/train_data.npy"
+    X_all = np.load(x_filename).astype("float32")
+    X_train = X_all[5:6]
+    X_valid = np.asarray([], dtype="float32")
+    args = dict()
+    args["X_train"] = X_train
+    args["X_valid"] = X_valid
+    args["num_epochs"] = 100
+    args["learning_rate"] = 0.01
+    args["batch_size"] = 1
+    args["momentum"] = 0.9
+    args["out_pkl"] = out_pkl
+    args["config"] = "configurations/vgg_a_subset_less_depth.py"
     train_ae.train(args)
 
 if __name__ == '__main__':
