@@ -55,10 +55,10 @@ def train(args):
     symbols = prepare(args)
     train_fn, eval_fn, out_fn, l_out = \
         symbols["train_fn"], symbols["eval_fn"], symbols["out_fn"], symbols["l_out"]
-    X_all = args["X_all"]
+    X_train, X_valid = args["X_train"], args["X_valid"]
     np.random.shuffle(X_all)
-    X_train = X_all[0 : 0.9*X_all.shape[0]]
-    X_valid = X_all[0.9*X_all.shape[0] ::]
+    #X_train = X_all[0 : 0.9*X_all.shape[0]]
+    #X_valid = X_all[0.9*X_all.shape[0] ::]
     sys.stderr.write("X_train and X_valid shape: %s, %s\n" % (X_train.shape, X_valid.shape))
 
     num_epochs, bs = args["num_epochs"], args["batch_size"]
