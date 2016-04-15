@@ -70,18 +70,19 @@ LAYERS = "conv4_2,conv1_1,conv2_1,conv3_1,conv4_1,conv5_1".split(",")
 """
 
 parser = argparse.ArgumentParser(description="style transfer")
-parser.add_argument("--config_name", dest="config_name", help="name of model config file")
-parser.add_argument("--model_name", dest="model_name", help="name of model file")
-parser.add_argument("--npy_file", dest="npy_file", help="name of npy train file (to get reference image)")
-parser.add_argument("--ref_image_index", type=int, dest="ref_image_index", help="index of ref image")
-parser.add_argument("--style_coef", dest="style_coef", type=float, help="style coef")
-parser.add_argument("--variation_coef", dest="variation_coef", type=float, help="variation coef")
-parser.add_argument("--num_images", dest="num_images", type=int, help="number of images to generate")
-parser.add_argument("--num_iters", dest="num_iters", type=int, help="number of l-bfgs iters")
+parser.add_argument("--config_name", dest="config_name", help="name of model config file", required=True)
+parser.add_argument("--model_name", dest="model_name", help="name of model file", required=True)
+parser.add_argument("--npy_file", dest="npy_file", help="name of npy train file (to get reference image)", required=True)
+parser.add_argument("--ref_image_index", type=int, dest="ref_image_index", help="index of ref image", required=True)
+parser.add_argument("--reference_coef", dest="reference_coef", type=float, help="reference coef (wip)")
+parser.add_argument("--style_coef", dest="style_coef", type=float, help="style coef", required=True)
+parser.add_argument("--variation_coef", dest="variation_coef", type=float, help="variation coef", required=True)
+parser.add_argument("--num_images", dest="num_images", type=int, help="number of images to generate", required=True)
+parser.add_argument("--num_iters", dest="num_iters", type=int, help="number of l-bfgs iters", required=True)
 #parser.add_argument("--out_folder", dest="out_folder", help="variation coef")
 parser.add_argument("--grid", dest="grid", help="plot a grid?")
 parser.add_argument("--sigma", dest="sigma", help="sigma for if we gauss blur the white noise image")
-parser.add_argument("--outfile", dest="outfile", help="out file")
+parser.add_argument("--outfile", dest="outfile", help="out file", required=True)
 parser.add_argument("--cheat_index", dest="cheat_index", type=int, help="use another image in the training set instead of white noise")
 args = parser.parse_args()
 
@@ -111,6 +112,9 @@ with open(MODEL_NAME) as f:
     except Exception as e:
         set_all_param_values(net_raw["l_out"], dat["param values"])
 layers = net_raw["target_layers"]
+if args.reference_coef != None or args.reference_coef != 0:
+    sys.stderr.write("args.reference_coef > 0, adding input layer to list...\n")
+    layers["input"] = get_all_layers(net_raw["l_out"])[0]
 print "target layers:", layers
 
 data = np.load(NPY_FILE)
@@ -135,7 +139,10 @@ gen_features = {k: v for k, v in zip(layers.keys(), gen_features)}
 losses = []
 # style loss
 for key in layers:
-    losses.append(STYLE_COEF*style_loss(art_features, gen_features, key))
+    if key == "input":
+        losses.append(args.reference_coef*style_loss(art_features, gen_features, key))
+    else: 
+        losses.append(STYLE_COEF*style_loss(art_features, gen_features, key))
 # total variation loss
 losses.append(VARIATION_COEF * total_variation_loss(generated_image))
 total_loss = sum(losses)
