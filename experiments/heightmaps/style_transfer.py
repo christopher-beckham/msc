@@ -78,9 +78,11 @@ parser.add_argument("--style_coef", dest="style_coef", type=float, help="style c
 parser.add_argument("--variation_coef", dest="variation_coef", type=float, help="variation coef")
 parser.add_argument("--num_images", dest="num_images", type=int, help="number of images to generate")
 parser.add_argument("--num_iters", dest="num_iters", type=int, help="number of l-bfgs iters")
-parser.add_argument("--out_folder", dest="out_folder", help="variation coef")
+#parser.add_argument("--out_folder", dest="out_folder", help="variation coef")
 parser.add_argument("--grid", dest="grid", help="plot a grid?")
 parser.add_argument("--sigma", dest="sigma", help="sigma for if we gauss blur the white noise image")
+parser.add_argument("--outfile", dest="outfile", help="out file")
+parser.add_argument("--cheat_index", dest="cheat_index", type=int, help="use another image in the training set instead of white noise")
 args = parser.parse_args()
 
 CONFIG_NAME = args.config_name
@@ -91,7 +93,7 @@ STYLE_COEF = args.style_coef
 VARIATION_COEF = args.variation_coef
 NUM_IMAGES = args.num_images
 NUM_ITERS = args.num_iters
-OUT_FOLDER = args.out_folder
+#OUT_FOLDER = args.out_folder
 
 if NUM_ITERS < 6:
     print "error: num iters must be >= 6!"
@@ -111,7 +113,9 @@ with open(MODEL_NAME) as f:
 layers = net_raw["target_layers"]
 print "target layers:", layers
 
-heightmap = np.load(NPY_FILE)[REF_IMAGE_INDEX:REF_IMAGE_INDEX+1]
+data = np.load(NPY_FILE)
+
+heightmap = data[REF_IMAGE_INDEX:REF_IMAGE_INDEX+1]
 if net_raw["use_rgb"]:
     # we have to make this (1,3,256,256) instead of (1,1,256,256)
     heightmap = np.asarray( [ [ heightmap[0,0,:,:], heightmap[0,0,:,:], heightmap[0,0,:,:] ] ] )
@@ -162,6 +166,9 @@ for iter_ in range(0, NUM_IMAGES):
     if args.sigma > 0:
         white_noise = gaussian_filter(white_noise[0][0], sigma=args.sigma).reshape(photo.shape)
         sys.stderr.write("adding gaussian noise\n")
+    elif args.cheat_index != None:
+        white_noise = data[args.cheat_index : args.cheat_index+1]
+        sys.stderr.write("using image index %i as the seed image" % args.cheat_index)
     generated_image.set_value(white_noise)
     x0 = generated_image.get_value().astype( theano.config.floatX )
     xs = []
@@ -182,7 +189,7 @@ for iter_ in range(0, NUM_IMAGES):
                 plt.subplot(nrow, ncol, cc)
                 plt.imshow(xs[cc-1][0][0], cmap="gray")
                 cc += 1
-        plt.savefig(OUT_FOLDER + "/%i_evolution.png" % t0)
+        plt.savefig("%s_evolution.png" % args.outfile)
     # save final heightmap
-    imsave(OUT_FOLDER + "/%i.png" % t0, arr=xs[-1][0][0])
+    imsave("%s.png" % args.outfile, arr=xs[-1][0][0])
 

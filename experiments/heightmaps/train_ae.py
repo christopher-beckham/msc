@@ -36,6 +36,8 @@ def prepare(args):
         args["num_epochs"], args["batch_size"], args["learning_rate"], args["momentum"]
     if "rmsprop" in args:
         updates = rmsprop(grads, params, learning_rate=learning_rate)
+    elif "adagrad" in args:
+        updates = adagrad(grads, params, learning_rate=learning_rate)
     else:
         updates = nesterov_momentum(grads, params, learning_rate=learning_rate, momentum=momentum)
 
@@ -56,7 +58,8 @@ def train(args):
     train_fn, eval_fn, out_fn, l_out = \
         symbols["train_fn"], symbols["eval_fn"], symbols["out_fn"], symbols["l_out"]
     X_train, X_valid = args["X_train"], args["X_valid"]
-    np.random.shuffle(X_all)
+    np.random.shuffle(X_train)
+    np.random.shuffle(X_valid)
     #X_train = X_all[0 : 0.9*X_all.shape[0]]
     #X_valid = X_all[0.9*X_all.shape[0] ::]
     sys.stderr.write("X_train and X_valid shape: %s, %s\n" % (X_train.shape, X_valid.shape))
@@ -96,7 +99,7 @@ def train(args):
            b += 1
 
         avg_valid_loss = np.mean(this_valid_losses)
-        if avg_valid_loss < best_valid_loss:
+        if avg_valid_loss < best_valid_loss or X_valid.shape[0] == 0:
             best_valid_loss = avg_valid_loss
             best_valid_loss_ind = 1
             best_model = lasagne.layers.get_all_param_values(l_out)
