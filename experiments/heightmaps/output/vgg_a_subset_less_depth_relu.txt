@@ -1,0 +1,2 @@
+epoch,train_loss,has_valid_loss_improved,time
+1,nan,nan,0,629.622105

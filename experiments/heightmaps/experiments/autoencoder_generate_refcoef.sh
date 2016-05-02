@@ -13,9 +13,11 @@ python ../style_transfer.py \
     --npy_file=../train_data_minimal.npy \
     --ref_image_index=5 \
     --style_coef=1e7 \
-    --variation_coef=0.0001 \
+    --variation_coef=0 \
+    --reference_coef=1e-5 \
     --num_images=1 \
-    --num_iters=6 \
+    --num_iters=10 \
     --grid=no \
-    --outfile=../output_neat_new/19apr
+    --sigma=8 \
+    --outfile=../output_neat_new/refcoef
 #done
