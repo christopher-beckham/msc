@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[352]:
 
 import theano
 from theano import tensor as T
@@ -23,6 +23,8 @@ get_ipython().magic(u'matplotlib inline')
 
 import os
 import cPickle as pickle
+
+from theano.tensor import TensorType
 
 
 # In[2]:
@@ -58,7 +60,38 @@ class SkipLayer(Layer):
 
 # ----
 
-# In[27]:
+# In[388]:
+
+f32b = TensorType('float32', [False, True, True, True])
+tmp = f32b()
+tmp.eval({tmp: np.zeros((10,2,2,2), dtype="float32")})
+
+
+# In[410]:
+
+get_ipython().magic(u'pinfo T.addbroadcast')
+
+
+# In[454]:
+
+rs = np.random.RandomState(1234)
+rng = theano.tensor.shared_randomstreams.RandomStreams(rs.randint(999999))
+shp = (10,8,26,26)
+#new_shp = np.asarray([shp[0]]).reshape(shp.shape)
+
+mask = rng.binomial( n=1, p=(0.5), size=(10,1,1,1) )
+print mask.broadcastable
+mask = T.addbroadcast(mask, *[x for x in range(1, len(shp))])
+print mask.broadcastable
+print (mask * T.ones((10,8,26,26))).eval()
+
+
+# In[431]:
+
+get_ipython().magic(u'pinfo T.addbroadcast')
+
+
+# In[480]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, max_=10,
@@ -78,14 +111,29 @@ class SkippableNonlinearityLayer(Layer):
             # if uniform(0,1) < p, then apply I(x), else g(x)
             # so the probability of applying a nonlinearity
             # is 1-p
+            """
             return ifelse(
                 T.lt(self._srng.uniform( (1,), 0, 1)[0], self.p),
                 input,
                 self.nonlinearity(input)
             )
+            """
+            #print input.ndim
+            
+            if input.ndim==4:
+                mask = self._srng.binomial(n=1, p=(0.5), size=(input.shape[0],1,1,1))
+                mask = T.addbroadcast(mask, 1,2,3)
+                return mask*input + (1-mask)*self.nonlinearity(input)
+            elif input.ndim == 2:
+                mask = self._srng.binomial(n=1, p=(0.5), size=(input.shape[0],1))
+                mask = T.addbroadcast(mask, 1)
+                return mask*input + (1-mask)*self.nonlinearity(input) 
+            
+            #return input
+            
 
 
-# In[182]:
+# In[9]:
 
 shallow_net = [
     ("conv", 3, 16),
@@ -97,7 +145,7 @@ shallow_net = [
 ]
 
 
-# In[4]:
+# In[10]:
 
 deep_net = [
     ("conv", 3, 8, 1),
@@ -120,7 +168,7 @@ deep_net = [
 ]
 
 
-# In[74]:
+# In[274]:
 
 def get_net(cfg, args={}):
     nonlinearity = args["nonlinearity"] if "nonlinearity" in args else linear
@@ -152,6 +200,7 @@ def get_net(cfg, args={}):
     train_fn = theano.function([X, y], loss, updates=updates)
     loss_fn = theano.function([X, y], loss)
     eval_fn = theano.function([X], net_out_det)
+    tmp_fn = theano.function([X], net_out)
     outs_with_nonlinearity = theano.function(
         [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
               if isinstance(layer, SkippableNonlinearityLayer) ]
@@ -166,11 +215,12 @@ def get_net(cfg, args={}):
         "loss_fn": loss_fn,
         "outs_with_nonlinearity": outs_with_nonlinearity,
         "outs_without_nonlinearity": outs_without_nonlinearity,
-        "l_out": l_out
+        "l_out": l_out,
+        "tmp_fn": tmp_fn
     }
 
 
-# In[6]:
+# In[12]:
 
 train_data, valid_data, _ = hp.load_mnist("../../data/mnist.pkl.gz")
 X_train, y_train = train_data
@@ -179,7 +229,7 @@ X_valid, y_valid = valid_data
 X_valid, y_valid = X_valid.astype("float32"), y_valid.astype("int32")
 
 
-# In[63]:
+# In[275]:
 
 def iterate(X_train, y_train, batch_size):
     b = 0
@@ -194,7 +244,7 @@ def iterate(X_train, y_train, batch_size):
         yield X_batch, y_batch
 
 
-# In[82]:
+# In[276]:
 
 def train(X_train, y_train, X_valid, y_valid, 
           net_cfg, 
@@ -233,19 +283,38 @@ def train(X_train, y_train, X_valid, y_valid,
 
 # If we train two networks: one with $p = 0$ and $p = 0.5$, we expect the latter to have activations that are not close to the saturation regime. This is because if $x$ is very big, $tanh(x)$ will be in the saturation regime, but when we compute $I(x) = x$, this will be massive, therefore significantly influencing the subsequent layers and forcing backprop to lower the magnitude of $x$.
 
-# In[45]:
+# In[481]:
 
-get_net(deep_net, {"p":0.0, "nonlinearity": tanh})
+tmp_net = get_net(deep_net, {"p":0.0, "nonlinearity": tanh})
+
+
+# Let's verify the implementation using a dummy example.
+
+# In[555]:
+
+def test_this():
+    l_in = InputLayer( (None, 5) )
+    l_dense = DenseLayer(l_in, num_units=5, nonlinearity=linear, W=np.eye(5))
+    l_id = SkippableNonlinearityLayer(l_dense, nonlinearity=sigmoid)
+    X = T.fmatrix()
+    out = get_output(l_id, X)
+    return theano.function([X], out)
+dummy_net_eval = test_this()
+
+
+# In[572]:
+
+dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 
 # Let's try a "deep" net on a subset of MNIST, and see what the outputs look like.
 
-# In[84]:
+# In[200]:
 
-skip_check = False
+skip_check = True
 
 
-# In[85]:
+# In[201]:
 
 if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
     for p in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]:
@@ -253,7 +322,7 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
             np.random.seed(0)
             id_net = get_net(deep_net, {"p":p, "nonlinearity": nonlinearity[1]})
             train_losses_with_id = train(
-                X_train, y_train, X_valid, y_valid,
+                X_train[0:100], y_train[0:100], X_valid[0:100], y_valid[0:100],
                 id_net,
                 num_epochs=10,
                 batch_size=32,
