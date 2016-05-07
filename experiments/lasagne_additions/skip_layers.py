@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[95]:
 
 import theano
 from theano import tensor as T
@@ -27,6 +27,8 @@ import cPickle as pickle
 from theano.tensor import TensorType
 
 from theano.ifelse import ifelse
+
+from time import time
 
 
 # In[192]:
@@ -117,7 +119,7 @@ class SkippableNonlinearityLayer(Layer):
             
 
 
-# In[4]:
+# In[89]:
 
 shallow_net = [
     ("conv", 3, 16, 1),
@@ -129,16 +131,9 @@ shallow_net = [
 ]
 
 
-# In[5]:
+# In[90]:
 
 deep_net = [
-    ("conv", 3, 8, 1),
-    ("conv", 3, 8, 1),
-    ("conv", 3, 8, 1),
-    
-    ("conv", 3, 16, 1),
-    ("conv", 3, 16, 1),
-    ("conv", 3, 16, 1),
     ("conv", 3, 16, 1),
     ("conv", 3, 16, 1),
     ("conv", 3, 16, 1),
@@ -147,12 +142,19 @@ deep_net = [
     ("conv", 3, 32, 1),
     ("conv", 3, 32, 1),
     ("conv", 3, 32, 1),
+    ("conv", 3, 32, 1),
+    ("conv", 3, 32, 1),
+    
+    ("conv", 3, 64, 1),
+    ("conv", 3, 64, 1),
+    ("conv", 3, 64, 1),
+    ("conv", 3, 64, 1),
     
     ("dense", 128) 
 ]
 
 
-# In[50]:
+# In[72]:
 
 def get_net(cfg, data, args={}):
     nonlinearity = args["nonlinearity"] if "nonlinearity" in args else linear
@@ -182,7 +184,10 @@ def get_net(cfg, data, args={}):
     net_out_det = get_output(l_out, X, deterministic=True)
     loss = categorical_crossentropy(net_out, y).mean()
     params = get_all_params(l_out, trainable=True)
-    grads = total_norm_constraint( T.grad(loss, params), max_norm=10)
+    if "max_norm" in args:
+        grads = total_norm_constraint( T.grad(loss, params), max_norm=10)
+    else:
+        grads = T.grad(loss, params)
     updates = nesterov_momentum(grads, params, learning_rate=0.01, momentum=0.9)
     # index fns
     bs = args["batch_size"]
@@ -225,22 +230,28 @@ def get_net(cfg, data, args={}):
     }
 
 
-# In[70]:
+# In[76]:
 
 train_data, valid_data, _ = hp.load_mnist("../../data/mnist.pkl.gz")
 X_train, y_train = train_data
 X_valid, y_valid = valid_data
+# minimal
+X_train_minimal = X_train[0:100]
+y_train_minimal = y_train[0:100]
+# ---
 X_train = theano.shared(np.asarray(X_train, dtype=theano.config.floatX), borrow=True)
 y_train = theano.shared(np.asarray(y_train, dtype=theano.config.floatX), borrow=True)
 X_valid = theano.shared(np.asarray(X_valid, dtype=theano.config.floatX), borrow=True)
 y_valid = theano.shared(np.asarray(y_valid, dtype=theano.config.floatX), borrow=True)
+# minimal
+X_train_minimal = theano.shared(np.asarray(X_train_minimal, dtype=theano.config.floatX), borrow=True)
+y_train_minimal = theano.shared(np.asarray(y_train_minimal, dtype=theano.config.floatX), borrow=True)
+# ---
 y_train = T.cast(y_train, "int32")
 y_valid = T.cast(y_valid, "int32")
-
-
-# In[37]:
-
-X_valid.dtype
+# minimal
+y_train_minimal = T.cast(y_train_minimal, "int32")
+# ---
 
 
 # In[22]:
@@ -261,12 +272,11 @@ def iterate(X_train, y_train, batch_size):
         yield X_batch, y_batch
 
 
-# In[67]:
+# In[94]:
 
-def train(X_train, y_train, X_valid, y_valid, 
-          net_cfg, 
-          num_epochs, 
-          batch_size, 
+def train(net_cfg, 
+          num_epochs,
+          n_batches, 
           out_file=None,
           print_out=True,
           debug=False):
@@ -276,14 +286,12 @@ def train(X_train, y_train, X_valid, y_valid,
         f = open("%s.txt" % out_file, "wb")
         f.write("train_loss,valid_loss\n")
     if print_out:
-        print "train_loss,valid_loss"
+        print "epoch,train_loss,valid_loss,time"
     # extract functions
     train_fn = net_cfg["train_fn"]
     loss_fn = net_cfg["loss_fn"]
     outs_with_nonlinearity = net_cfg["outs_with_nonlinearity"]
     # training
-    train_losses = []
-    n_batches = X_train.get_value().shape[0] // batch_size
     idxs = [x for x in range(0, n_batches)]
     if debug:
         sys.stderr.write("n_batches: %s\n" % n_batches)
@@ -291,15 +299,16 @@ def train(X_train, y_train, X_valid, y_valid,
     for epoch in range(0, num_epochs):
         this_train_losses = []
         np.random.shuffle(idxs)
+        t0 = time()
         for i in range(0, len(idxs)):
             loss_for_this_batch = train_fn( idxs[i] )
             this_train_losses.append( loss_for_this_batch )
-        train_losses.append( np.mean(this_train_losses) )
+        time_taken = time() - t0
         valid_loss = loss_fn()
         if f != None:
-            f.write( "%f,%f\n" % (np.mean(this_train_losses), valid_loss) )
+            f.write( "%i,%f,%f,%i,\n" % (epoch+1, np.mean(this_train_losses), valid_loss, time_taken) )
         if print_out:
-            print "%f,%f" % (np.mean(this_train_losses), valid_loss)
+            print "%i,%f,%f,%i" % (epoch+1, np.mean(this_train_losses), valid_loss, time_taken)
         #print valid_loss
         #return train_losses
     if f != None:
@@ -311,15 +320,6 @@ def train(X_train, y_train, X_valid, y_valid,
 
 
 # If we train two networks: one with $p = 0$ and $p = 0.5$, we expect the latter to have activations that are not close to the saturation regime. This is because if $x$ is very big, $tanh(x)$ will be in the saturation regime, but when we compute $I(x) = x$, this will be massive, therefore significantly influencing the subsequent layers and forcing backprop to lower the magnitude of $x$.
-
-# In[64]:
-
-tmp_net = get_net(
-    shallow_net,
-    (X_train, y_train, X_valid, y_valid),
-    { "p":0.0, "nonlinearity": tanh, "batch_size": 10}
-)
-
 
 # Let's verify the implementation using a dummy example.
 
@@ -340,26 +340,39 @@ dummy_net_eval = test_this()
 dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 
-# Let's try a "deep" net on a subset of MNIST, and see what the outputs look like.
+# Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
+
+# In[96]:
+
+bs = X_train_minimal.get_value().shape[0] // 10
+train(
+    net_cfg=get_net(
+        cfg=shallow_net, 
+        data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
+        args={"p":0.1, "nonlinearity": tanh, "batch_size": bs}
+    ),
+    num_epochs=10,
+    n_batches = X_train_minimal.get_value().shape[0] // bs,
+)
+
 
 # In[43]:
 
 skip_check = True
 
 
-# In[71]:
+# In[84]:
 
 if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
-    for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
-        for nonlinearity in [("sigmoid", sigmoid), ("tanh", tanh), ("relu", rectify)]:
+    batch_size = 128
+    for p in [0.1, 0.25, 0.5, 0.75]:
+        for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
             np.random.seed(0)
-            args = {"p":p, "nonlinearity": nonlinearity[1], "batch_size": 128}
-            id_net = get_net(deep_net, (X_train, y_train, X_valid, y_valid), args)
-            train_losses_with_id = train(
-                X_train, y_train, X_valid, y_valid,
-                id_net,
+            args = {"p":p, "nonlinearity": nonlinearity[1], "batch_size": batch_size}
+            train(
+                get_net(deep_net, (X_train, y_train, X_valid, y_valid), args),
                 num_epochs=10,
-                batch_size=args["batch_size"],
+                n_batches=X_train.get_value().shape[0] // batch_size,
                 out_file="output/p%f_%s" % (p, nonlinearity[0]),
                 debug=False
             )
