@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[352]:
+# In[573]:
 
 import theano
 from theano import tensor as T
@@ -27,7 +27,7 @@ import cPickle as pickle
 from theano.tensor import TensorType
 
 
-# In[2]:
+# In[574]:
 
 from theano.ifelse import ifelse
 
@@ -60,19 +60,7 @@ class SkipLayer(Layer):
 
 # ----
 
-# In[388]:
-
-f32b = TensorType('float32', [False, True, True, True])
-tmp = f32b()
-tmp.eval({tmp: np.zeros((10,2,2,2), dtype="float32")})
-
-
-# In[410]:
-
-get_ipython().magic(u'pinfo T.addbroadcast')
-
-
-# In[454]:
+# In[575]:
 
 rs = np.random.RandomState(1234)
 rng = theano.tensor.shared_randomstreams.RandomStreams(rs.randint(999999))
@@ -86,12 +74,7 @@ print mask.broadcastable
 print (mask * T.ones((10,8,26,26))).eval()
 
 
-# In[431]:
-
-get_ipython().magic(u'pinfo T.addbroadcast')
-
-
-# In[480]:
+# In[576]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, max_=10,
@@ -133,7 +116,7 @@ class SkippableNonlinearityLayer(Layer):
             
 
 
-# In[9]:
+# In[577]:
 
 shallow_net = [
     ("conv", 3, 16),
@@ -145,7 +128,7 @@ shallow_net = [
 ]
 
 
-# In[10]:
+# In[578]:
 
 deep_net = [
     ("conv", 3, 8, 1),
@@ -168,7 +151,7 @@ deep_net = [
 ]
 
 
-# In[274]:
+# In[579]:
 
 def get_net(cfg, args={}):
     nonlinearity = args["nonlinearity"] if "nonlinearity" in args else linear
@@ -220,7 +203,7 @@ def get_net(cfg, args={}):
     }
 
 
-# In[12]:
+# In[580]:
 
 train_data, valid_data, _ = hp.load_mnist("../../data/mnist.pkl.gz")
 X_train, y_train = train_data
@@ -229,7 +212,7 @@ X_valid, y_valid = valid_data
 X_valid, y_valid = X_valid.astype("float32"), y_valid.astype("int32")
 
 
-# In[275]:
+# In[581]:
 
 def iterate(X_train, y_train, batch_size):
     b = 0
@@ -244,7 +227,7 @@ def iterate(X_train, y_train, batch_size):
         yield X_batch, y_batch
 
 
-# In[276]:
+# In[582]:
 
 def train(X_train, y_train, X_valid, y_valid, 
           net_cfg, 
@@ -283,14 +266,14 @@ def train(X_train, y_train, X_valid, y_valid,
 
 # If we train two networks: one with $p = 0$ and $p = 0.5$, we expect the latter to have activations that are not close to the saturation regime. This is because if $x$ is very big, $tanh(x)$ will be in the saturation regime, but when we compute $I(x) = x$, this will be massive, therefore significantly influencing the subsequent layers and forcing backprop to lower the magnitude of $x$.
 
-# In[481]:
+# In[583]:
 
 tmp_net = get_net(deep_net, {"p":0.0, "nonlinearity": tanh})
 
 
 # Let's verify the implementation using a dummy example.
 
-# In[555]:
+# In[584]:
 
 def test_this():
     l_in = InputLayer( (None, 5) )
@@ -302,7 +285,7 @@ def test_this():
 dummy_net_eval = test_this()
 
 
-# In[572]:
+# In[586]:
 
 dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
