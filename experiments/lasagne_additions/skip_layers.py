@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[95]:
+# In[102]:
 
 import theano
 from theano import tensor as T
@@ -29,6 +29,8 @@ from theano.tensor import TensorType
 from theano.ifelse import ifelse
 
 from time import time
+
+get_ipython().magic(u'load_ext rpy2.ipython')
 
 
 # In[192]:
@@ -183,9 +185,10 @@ def get_net(cfg, data, args={}):
     net_out = get_output(l_out, X)
     net_out_det = get_output(l_out, X, deterministic=True)
     loss = categorical_crossentropy(net_out, y).mean()
+    loss_det = categorical_crossentropy(net_out_det, y).mean()
     params = get_all_params(l_out, trainable=True)
     if "max_norm" in args:
-        grads = total_norm_constraint( T.grad(loss, params), max_norm=10)
+        grads = total_norm_constraint( T.grad(loss, params), max_norm=args["max_norm"])
     else:
         grads = T.grad(loss, params)
     updates = nesterov_momentum(grads, params, learning_rate=0.01, momentum=0.9)
@@ -198,7 +201,9 @@ def get_net(cfg, data, args={}):
             y: y_train[idx*bs : (idx+1)*bs]
         }
     )
-    loss_fn = theano.function(inputs=[], outputs=loss, 
+    # this is for the validation set
+    # make the output deterministic
+    loss_fn = theano.function(inputs=[], outputs=loss_det, 
         givens={
             X: X_valid,
             y: y_valid
@@ -272,7 +277,7 @@ def iterate(X_train, y_train, batch_size):
         yield X_batch, y_batch
 
 
-# In[94]:
+# In[97]:
 
 def train(net_cfg, 
           num_epochs,
@@ -306,9 +311,9 @@ def train(net_cfg,
         time_taken = time() - t0
         valid_loss = loss_fn()
         if f != None:
-            f.write( "%i,%f,%f,%i,\n" % (epoch+1, np.mean(this_train_losses), valid_loss, time_taken) )
+            f.write( "%i,%f,%f,%f,\n" % (epoch+1, np.mean(this_train_losses), valid_loss, time_taken) )
         if print_out:
-            print "%i,%f,%f,%i" % (epoch+1, np.mean(this_train_losses), valid_loss, time_taken)
+            print "%i,%f,%f,%f" % (epoch+1, np.mean(this_train_losses), valid_loss, time_taken)
         #print valid_loss
         #return train_losses
     if f != None:
@@ -342,33 +347,33 @@ dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 # Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
 
-# In[96]:
+# In[195]:
 
 bs = X_train_minimal.get_value().shape[0] // 10
 train(
     net_cfg=get_net(
         cfg=shallow_net, 
         data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
-        args={"p":0.1, "nonlinearity": tanh, "batch_size": bs}
+        args={"p":0.1, "nonlinearity": tanh, "batch_size": bs, "max_norm": 10}
     ),
     num_epochs=10,
     n_batches = X_train_minimal.get_value().shape[0] // bs,
 )
 
 
-# In[43]:
+# In[99]:
 
-skip_check = True
+skip_check = False
 
 
-# In[84]:
+# In[196]:
 
 if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
     batch_size = 128
     for p in [0.1, 0.25, 0.5, 0.75]:
         for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
             np.random.seed(0)
-            args = {"p":p, "nonlinearity": nonlinearity[1], "batch_size": batch_size}
+            args = {"p":p, "nonlinearity": nonlinearity[1], "batch_size": batch_size, "max_norm": 10}
             train(
                 get_net(deep_net, (X_train, y_train, X_valid, y_valid), args),
                 num_epochs=10,
@@ -378,12 +383,137 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
             )
 
 
+# Caveats about prelim exps:
+# * Loss calculation on valid set not deterministic
+# * Using lightweight deep network
+# * NaNs due to not using grad clipping
+
+# In[124]:
+
+get_ipython().run_cell_magic(u'R', u'', u'df = read.csv("output/p0.000000_tanh.txt")\nplot(df$train_loss, type="l", col="blue", ylim=c(0,1))\ndf2 = read.csv("output/p0.250000_tanh.txt")\nlines(df2$trian_loss, col="red")\ndf3 = read.csv("output/p0.500000_tanh.txt")\nlines(df3$train_loss, col="orange")\ndf4 = read.csv("output/p0.750000_tanh.txt")\nlines(df4$train_loss, col="green")')
+
+
 # In[50]:
 
 plt.plot(train_losses_without_id, "b-", train_losses_with_id, "r-")
 plt.xlabel("# epochs")
 plt.ylabel("train loss")
 
+
+# -----
+
+# Ok, let's look at all the tanh models
+
+# In[134]:
+
+deep_net_light = [
+    ("conv", 3, 8, 1),
+    ("conv", 3, 8, 1),
+    ("conv", 3, 8, 1),
+    
+    ("conv", 3, 16, 1),
+    ("conv", 3, 16, 1),
+    ("conv", 3, 16, 1),
+    ("conv", 3, 16, 1),
+    ("conv", 3, 16, 1),
+    ("conv", 3, 16, 1),
+    
+    ("conv", 3, 32, 1),
+    ("conv", 3, 32, 1),
+    ("conv", 3, 32, 1),
+    ("conv", 3, 32, 1),
+    
+    ("dense", 128) 
+]
+
+
+# In[168]:
+
+tanh_models = dict()
+for p in [0.0, 0.25, 0.5, 0.75]:
+    with open("output/p%f_tanh.model" % p) as f:
+        model = pickle.load(f)
+    tmp_net = get_net(
+        deep_net_light,
+        (X_train, y_train, X_valid, y_valid),
+        {"p":0.0, "nonlinearity": tanh, "batch_size": 32}
+    )
+    tanh_models[p] = tmp_net
+    set_all_param_values(tanh_models[p]["l_out"], model)
+
+
+# In[159]:
+
+tanh_models[0.0]["outs_without_nonlinearity"](X_train.get_value()[0:10])[4].shape
+
+
+# In[160]:
+
+tanh_models[0.0]["outs_with_nonlinearity"](X_train.get_value()[0:10])[4].shape
+
+
+# Compare the tanh models with the baseline
+
+# In[189]:
+
+fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
+fig.tight_layout()
+for i in range(0,4*3):
+    plt.subplot(4,3,i)
+    plt.figure
+    plt.xlim(-4, 4)
+    plt.ylim(-2, 2)
+    plt.ylabel("g(x)")
+    plt.xlabel("x")
+    plt.plot(
+        tanh_models[0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        tanh_models[0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        "bo",
+        tanh_models[0.25]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        tanh_models[0.25]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        "ro",
+    )
+
+
+# In[194]:
+
+fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
+fig.tight_layout()
+for i in range(0,4*3):
+    plt.subplot(4,3,i)
+    #plt.xlim(-4, 4)
+    #plt.ylim(-2, 2)
+    plt.ylabel("g(x)")
+    plt.xlabel("x")
+    plt.plot(
+        tanh_models[0.5]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        tanh_models[0.5]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        "bo"
+    )
+
+
+# In[188]:
+
+fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
+fig.tight_layout()
+for i in range(0,4*3):
+    plt.subplot(4,3,i)
+    plt.figure
+    plt.xlim(-4, 4)
+    plt.ylim(-2, 2)
+    plt.ylabel("g(x)")
+    plt.xlabel("x")
+    plt.plot(
+        tanh_models[0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        tanh_models[0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        "bo",
+        tanh_models[0.75]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        tanh_models[0.75]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        "ro",
+    )
+
+
+# ----
 
 # In[181]:
 
