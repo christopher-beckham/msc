@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[117]:
 
 import theano
 from theano import tensor as T
@@ -9,6 +9,7 @@ import lasagne
 from lasagne.layers import *
 from lasagne.nonlinearities import *
 from lasagne.objectives import *
+from lasagne.regularization import *
 from lasagne.random import get_rng
 from lasagne.updates import *
 import numpy as np
@@ -257,7 +258,7 @@ def get_basic_net(args):
     return l_out
 
 
-# In[95]:
+# In[119]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -269,6 +270,9 @@ def get_net(l_out, data, args={}):
     net_out_det = get_output(l_out, X, deterministic=True)
     loss = categorical_crossentropy(net_out, y).mean()
     loss_det = categorical_crossentropy(net_out_det, y).mean()
+    if "l2" in args:
+        loss += args["l2"]*regularize_layer_params(l_out, l2)
+        loss_det += args["l2"]*regularize_layer_params(l_out, l2)
     params = get_all_params(l_out, trainable=True)
     if "max_norm" in args:
         grads = total_norm_constraint( T.grad(loss, params), max_norm=args["max_norm"])
@@ -450,31 +454,30 @@ dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 # Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
 
-# In[98]:
+# In[118]:
 
-"""
 dummy_net = get_net(
     l_out=get_deep_net_light({"p": 0.5, "nonlinearity": tanh}), 
     data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
-    args={"batch_size": 10, "max_norm": 3}
+    args={"batch_size": 10, "max_norm": 3, "l2": 100}
 )
 train(
     net_cfg=dummy_net,
     num_epochs=10,
     data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
 )
-"""
 
 
-# ----
+# ---
 
 # In[16]:
 
 skip_check = True
 
 
-# In[17]:
+# In[121]:
 
+"""
 if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
     for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
         for p in [0.0, 0.1, 0.25, 0.5, 0.75]:
@@ -483,11 +486,31 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
                 get_net(
                     get_deep_net_light({"p":p, "nonlinearity": nonlinearity[1]}),
                     (X_train, y_train, X_valid, y_valid), 
-                    {"batch_size": 128, "max_norm": 10}
+                    {"batch_size": 128, "max_norm": 2}
                 ),
                 num_epochs=10,
                 data=(X_train, y_train, X_valid, y_valid),
                 out_file="output/p%f_%s" % (p, nonlinearity[0]),
+                debug=False
+            )
+"""
+
+
+# In[122]:
+
+if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
+    for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+        for lamb in [1e-2, 1e-3, 1e-4, 1e-5]:
+            np.random.seed(0)
+            train(
+                get_net(
+                    get_deep_net_light({"p":p, "nonlinearity": nonlinearity[1]}),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128, "max_norm": 2, "l2": lamb}
+                ),
+                num_epochs=10,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file="output/p%f_%s_l%f" % (p, nonlinearity[0], lamb),
                 debug=False
             )
 
@@ -508,7 +531,7 @@ plt.ylabel("train loss")
 
 # Ok, let's look at all the tanh models
 
-# In[76]:
+# In[101]:
 
 models = dict()
 for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
@@ -527,82 +550,47 @@ for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
 
 # Compare the tanh and relu models with the baseline
 
-# In[60]:
+# In[103]:
 
-get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_tanh.txt")\ndf25 = read.csv("output/p0.250000_tanh.txt")\ndf50 = read.csv("output/p0.500000_tanh.txt")\ndf75 = read.csv("output/p0.750000_tanh.txt")\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$valid_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue")\nlines(df25$valid_loss, col="red")\nlines(df50$valid_loss, col="orange")\nlines(df75$valid_loss, col="green")\n# train plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="train loss", col="blue")\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n')
-
-
-# In[59]:
-
-get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_relu.txt")\ndf25 = read.csv("output/p0.250000_relu.txt")\ndf50 = read.csv("output/p0.500000_relu.txt")\ndf75 = read.csv("output/p0.750000_relu.txt")\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$valid_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue")\nlines(df25$valid_loss, col="red")\nlines(df50$valid_loss, col="orange")\nlines(df75$valid_loss, col="green")\n# train plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="train loss", col="blue")\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n')
+get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_tanh.txt")\ndf25 = read.csv("output/p0.250000_tanh.txt")\ndf50 = read.csv("output/p0.500000_tanh.txt")\ndf75 = read.csv("output/p0.750000_tanh.txt")\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$valid_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue", ylim=c(0, max(df75$valid_loss)))\nlines(df25$valid_loss, col="red")\nlines(df50$valid_loss, col="orange")\nlines(df75$valid_loss, col="green")\n# train plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="train loss", col="blue", ylim=c(0, max(df75$train_loss)))\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n')
 
 
-# In[80]:
+# In[104]:
 
-fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
-fig.tight_layout()
-for i in range(0,4*3):
-    plt.subplot(4,3,i)
-    plt.figure
-    #plt.xlim(-20, 20)
-    plt.ylim(-1, 1)
-    plt.ylabel("g(x)")
-    plt.xlabel("x")
-    plt.plot(
-        models["tanh"][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["tanh"][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        "bo",
-        models["tanh"][0.25]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["tanh"][0.25]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        "ro",
-    )
+get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_relu.txt")\ndf25 = read.csv("output/p0.250000_relu.txt")\ndf50 = read.csv("output/p0.500000_relu.txt")\ndf75 = read.csv("output/p0.750000_relu.txt")\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$valid_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue", ylim=c(0, max(df75$valid_loss)))\nlines(df25$valid_loss, col="red")\nlines(df50$valid_loss, col="orange")\nlines(df75$valid_loss, col="green")\n# train plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="train loss", col="blue", ylim=c(0, max(df75$train_loss)))\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n')
 
 
-# In[81]:
+# In[106]:
 
-fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
-fig.tight_layout()
-for i in range(0,4*3):
-    plt.subplot(4,3,i)
-    #plt.xlim(-10, 10)
-    plt.ylim(-1, 1)
-    plt.ylabel("g(x)")
-    plt.xlabel("x")
-    plt.plot(
-        models["tanh"][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["tanh"][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        "bo",
-        models["tanh"][0.5]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["tanh"][0.5]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        "ro",        
-    )
-
-
-# In[82]:
-
-fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
-fig.tight_layout()
-for i in range(0,4*3):
-    plt.subplot(4,3,i)
-    plt.figure
-    #plt.xlim(-10, 10)
-    plt.ylim(-1, 1)
-    plt.ylabel("g(x)")
-    plt.xlabel("x")
-    plt.plot(
-        models["tanh"][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["tanh"][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        "bo",
-        models["tanh"][0.75]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["tanh"][0.75]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        "ro",
-    )
+for nonlinearity in ["tanh", "relu"]:
+    for p in [0.1, 0.25, 0.5, 0.75]:
+        print p, nonlinearity
+        fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
+        fig.tight_layout()
+        for i in range(0,4*3):
+            plt.subplot(4,3,i)
+            plt.figure
+            #plt.xlim(-20, 20)
+            if nonlinearity == "tanh":
+                plt.ylim(-1, 1)
+            plt.ylabel("g(x)")
+            plt.xlabel("x")
+            plt.plot(
+                models[nonlinearity][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+                models[nonlinearity][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+                "bo",
+                models[nonlinearity][p]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+                models[nonlinearity][p]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+                "ro",
+            )
 
 
-# In[ ]:
-
-
-
+# Observations:
+# * For relu, trick seems to push the points away from the negative part (x < 0). So this is in a way doing the reverse of encouraging sparsity.
+# * For tanh, trick is pushing units away from saturation regime.
+# * $\frac{\partial L}{\partial g(Wx)} \cdot \frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = \frac{\partial L}{\partial W}$
+#    * Let's examine the case when we're using a sigmoid. When it is identity, $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 1 \cdot x$, so if $x$ is big then the gradient will be big. When the sigmoid is used, it becomes $\frac{\partial sigm(Wx)}{\partial x} \cdot x$. If $x$ is big, then $\frac{\partial sigm(Wx)}{\partial x}$ will be very small (saturation regime). So when $x$ is big we alternate between big and tiny gradients. The big gradients force us to use norm clipping. This alternating behaviour is what forces the network to try and keep $Wx$ small and not near the saturation areas?
+#    * For relu, when $x > 0$, $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 1 \cdot x$ no matter if relu or identity is used. If $x < 0$, then for relu $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 0 \cdot x$, but then if identity is used $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 1 \cdot x$, giving it a gradient and potentially "un-killing" neurons.
 
 # ----
 
