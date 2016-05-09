@@ -159,37 +159,41 @@ deep_net = [
 ]
 
 
-# In[50]:
+# In[125]:
 
 def get_deep_net_light(args):
+    if "dropout" in args:
+        sys.stderr.write("using dropout instead of skippable nonlinearity...\n")
     l_in = InputLayer( (None, 1, 28, 28))
     l_prev = l_in
     for i in range(0, 3):
-        l_prev = SkippableNonlinearityLayer(
-            Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=linear),
-            nonlinearity=args["nonlinearity"],
-            p=args["p"]
-        )
+        l_prev = Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=linear)
+        if "dropout" not in args:
+            l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+        else:
+            l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
     for i in range(0, 6):
-        l_prev = SkippableNonlinearityLayer(
-            Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=linear),
-            nonlinearity=args["nonlinearity"],
-            p=args["p"]
-        )
+        l_prev = Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=linear)
+        if "dropout" not in args:
+            l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+        else:
+            l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
     for i in range(0, 4):
-        l_prev = SkippableNonlinearityLayer(
-            Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=linear),
-            nonlinearity=args["nonlinearity"],
-            p=args["p"]
-        )
-    l_dense = SkippableNonlinearityLayer(
-        DenseLayer(l_prev, num_units=128, nonlinearity=linear),
-        nonlinearity=args["nonlinearity"],
-        p=args["p"]
-    )                                    
+        l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=linear)
+        if "dropout" not in args:
+            l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+        else:
+            l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
+            
+    l_dense = DenseLayer(l_prev, num_units=128, nonlinearity=linear)       
+    if "dropout" not in args:
+        l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+    else:
+        l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
+    
     l_out = DenseLayer(l_dense, num_units=10, nonlinearity=softmax)
     for layer in get_all_layers(l_out):
-        if isinstance(layer, SkippableNonlinearityLayer):
+        if isinstance(layer, SkippableNonlinearityLayer) or isinstance(layer, NonlinearityLayer):
             continue
         sys.stderr.write("%s,%s\n" % (layer, layer.output_shape))
     sys.stderr.write(str(count_params(l_out)) + "\n")
@@ -454,12 +458,12 @@ dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 # Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
 
-# In[118]:
+# In[127]:
 
 dummy_net = get_net(
-    l_out=get_deep_net_light({"p": 0.5, "nonlinearity": tanh}), 
+    l_out=get_deep_net_light({"p": 0.5, "dropout": True, "nonlinearity": tanh}), 
     data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
-    args={"batch_size": 10, "max_norm": 3, "l2": 100}
+    args={"batch_size": 10}
 )
 train(
     net_cfg=dummy_net,
@@ -474,6 +478,8 @@ train(
 
 skip_check = True
 
+
+# In this experiment we vary $p$
 
 # In[121]:
 
@@ -496,8 +502,13 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
 """
 
 
-# In[122]:
+# In this experiment we experiment with $L_{2}$
 
+# CAVEAT: GRADIENT CLIPPING WAS USED, AND MAX EPOCHS = 10
+
+# In[129]:
+
+"""
 if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
     for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
         for lamb in [1e-2, 1e-3, 1e-4, 1e-5]:
@@ -511,6 +522,28 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
                 num_epochs=10,
                 data=(X_train, y_train, X_valid, y_valid),
                 out_file="output/p%f_%s_l%f" % (p, nonlinearity[0], lamb),
+                debug=False
+            )
+"""
+
+
+# In this experiment we play with $p$ but for dropout (do no gradient clipping in this one... we probably won't need it)
+
+# In[128]:
+
+if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
+    for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+        for p in [0.1, 0.25, 0.5, 0.75]:
+            np.random.seed(0)
+            train(
+                get_net(
+                    get_deep_net_light({"p":p, "dropout": True, "nonlinearity": nonlinearity[1]}),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128}
+                ),
+                num_epochs=30,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file="output/p%f_%s_dropout" % (p, nonlinearity[0]),
                 debug=False
             )
 
@@ -589,7 +622,7 @@ for nonlinearity in ["tanh", "relu"]:
 # * For relu, trick seems to push the points away from the negative part (x < 0). So this is in a way doing the reverse of encouraging sparsity.
 # * For tanh, trick is pushing units away from saturation regime.
 # * $\frac{\partial L}{\partial g(Wx)} \cdot \frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = \frac{\partial L}{\partial W}$
-#    * Let's examine the case when we're using a sigmoid. When it is identity, $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 1 \cdot x$, so if $x$ is big then the gradient will be big. When the sigmoid is used, it becomes $\frac{\partial sigm(Wx)}{\partial x} \cdot x$. If $x$ is big, then $\frac{\partial sigm(Wx)}{\partial x}$ will be very small (saturation regime). So when $x$ is big we alternate between big and tiny gradients. The big gradients force us to use norm clipping. This alternating behaviour is what forces the network to try and keep $Wx$ small and not near the saturation areas?
+#    * Let's examine the case when we're using a sigmoid. When it is identity, $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 1 \cdot x$, so if $x$ is big then the gradient will be big. When the sigmoid is used, it becomes $\frac{\partial sigm(Wx)}{\partial x} \cdot x$. If $x$ is big, then $\frac{\partial sigm(Wx)}{\partial x}$ will be very small (saturation regime). So when $x$ is big we alternate between big and tiny gradients, the big gradients encouraging $x$ to not be near the saturating points. The big gradients force us to use norm clipping.
 #    * For relu, when $x > 0$, $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 1 \cdot x$ no matter if relu or identity is used. If $x < 0$, then for relu $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 0 \cdot x$, but then if identity is used $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 1 \cdot x$, giving it a gradient and potentially "un-killing" neurons.
 
 # ----
