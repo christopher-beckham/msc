@@ -232,7 +232,7 @@ def get_deep_net(args):
     return l_out
 
 
-# In[46]:
+# In[85]:
 
 def get_basic_net(args):
     l_in = InputLayer( (None, 1, 28, 28))
@@ -246,9 +246,9 @@ def get_basic_net(args):
     for i in range(0, 1):
         l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=args["nonlinearity"])
         l_prev = MaxPool2DLayer(l_prev, pool_size=2)
-    l_dense = DenseLayer(l_prev, num_units=128, nonlinearity=args["nonlinearity"])
+    #l_dense = DenseLayer(l_prev, num_units=128, nonlinearity=args["nonlinearity"])
     
-    l_out = DenseLayer(l_dense, num_units=10, nonlinearity=softmax)
+    l_out = DenseLayer(l_prev, num_units=10, nonlinearity=softmax)
     for layer in get_all_layers(l_out):
         if isinstance(layer, SkippableNonlinearityLayer):
             continue
@@ -257,7 +257,7 @@ def get_basic_net(args):
     return l_out
 
 
-# In[29]:
+# In[95]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -274,7 +274,10 @@ def get_net(l_out, data, args={}):
         grads = total_norm_constraint( T.grad(loss, params), max_norm=args["max_norm"])
     else:
         grads = T.grad(loss, params)
-    updates = nesterov_momentum(grads, params, learning_rate=0.01, momentum=0.9)
+    if "rmsprop" in args:
+        updates = rmsprop(grads, params, learning_rate=0.01)
+    else:
+        updates = nesterov_momentum(grads, params, learning_rate=0.01, momentum=0.9)
     # index fns
     bs = args["batch_size"]
     X_train, y_train, X_valid, y_valid = data
@@ -447,18 +450,20 @@ dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 # Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
 
-# In[53]:
+# In[98]:
 
+"""
 dummy_net = get_net(
-    l_out=get_deep_net_light({"p": 0.0, "nonlinearity": tanh}), 
+    l_out=get_deep_net_light({"p": 0.5, "nonlinearity": tanh}), 
     data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
-    args={"batch_size": 10, "max_norm": 10}
+    args={"batch_size": 10, "max_norm": 3}
 )
 train(
     net_cfg=dummy_net,
     num_epochs=10,
     data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
 )
+"""
 
 
 # ----
@@ -488,9 +493,7 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
 
 
 # Caveats about prelim exps:
-# * Loss calculation on valid set not deterministic
 # * Using lightweight deep network
-# * --NaNs due to not using grad clipping--
 # 
 # * We would expect the stochastic nonlinearity to take relatively longer to train, because we are training an ensemble of networks (analogous to dropout)
 
@@ -505,116 +508,93 @@ plt.ylabel("train loss")
 
 # Ok, let's look at all the tanh models
 
-# In[134]:
-
-deep_net_light = [
-    ("conv", 3, 8, 1),
-    ("conv", 3, 8, 1),
-    ("conv", 3, 8, 1),
-    
-    ("conv", 3, 16, 1),
-    ("conv", 3, 16, 1),
-    ("conv", 3, 16, 1),
-    ("conv", 3, 16, 1),
-    ("conv", 3, 16, 1),
-    ("conv", 3, 16, 1),
-    
-    ("conv", 3, 32, 1),
-    ("conv", 3, 32, 1),
-    ("conv", 3, 32, 1),
-    ("conv", 3, 32, 1),
-    
-    ("dense", 128) 
-]
-
-
-# In[255]:
+# In[76]:
 
 models = dict()
 for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
-    models[nonlinearity[0]] = dict()
-    for p in [0.0, 0.25, 0.5, 0.75]:
+    models[ nonlinearity[0] ] = dict()
+    for p in [0.75, 0.5, 0.25, 0.1, 0.0]:
         with open("output/p%f_%s.model" % (p, nonlinearity[0])) as f:
             model = pickle.load(f)
         tmp_net = get_net(
-            deep_net_light,
-            (X_train, y_train, X_valid, y_valid),
-            {"p":0.0, "nonlinearity": nonlinearity[1], "batch_size": 32}
+            get_deep_net_light({"p":0, "nonlinearity": nonlinearity[1]}),
+            (X_train, y_train, X_valid, y_valid), 
+            {"batch_size": 128, "max_norm": 10}
         )
-        models[nonlinearity[0]][p] = tmp_net
-        set_all_param_values(models[nonlinearity[0]][p]["l_out"], model)
+        models[ nonlinearity[0] ][p] = tmp_net
+        set_all_param_values(tmp_net["l_out"], model)
 
 
-# Compare the tanh models with the baseline
+# Compare the tanh and relu models with the baseline
 
-# In[272]:
+# In[60]:
 
-get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_tanh.txt")\ndf25 = read.csv("output/p0.250000_tanh.txt")\ndf50 = read.csv("output/p0.500000_tanh.txt")\ndf75 = read.csv("output/p0.750000_tanh.txt")\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue", ylim=c(0,1))\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n# train plots\nplot(dfb$epoch, type="l", xlab="# epochs", ylab="train loss", col="blue", ylim=c(0,1))\nlines(df25$epoch, col="red")\nlines(df50$epoch, col="orange")\nlines(df75$epoch, col="green")\n')
-
-
-# In[269]:
-
-get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_relu.txt")\ndf25 = read.csv("output/p0.250000_relu.txt")\ndf50 = read.csv("output/p0.500000_relu.txt")\ndf75 = read.csv("output/p0.750000_relu.txt")\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue", ylim=c(0,0.5))\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n# train plots\nplot(dfb$epoch, type="l", xlab="# epochs", ylab="train loss", col="blue", ylim=c(0,0.5))\nlines(df25$epoch, col="red")\nlines(df50$epoch, col="orange")\nlines(df75$epoch, col="green")\n')
+get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_tanh.txt")\ndf25 = read.csv("output/p0.250000_tanh.txt")\ndf50 = read.csv("output/p0.500000_tanh.txt")\ndf75 = read.csv("output/p0.750000_tanh.txt")\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$valid_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue")\nlines(df25$valid_loss, col="red")\nlines(df50$valid_loss, col="orange")\nlines(df75$valid_loss, col="green")\n# train plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="train loss", col="blue")\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n')
 
 
-# In[256]:
+# In[59]:
+
+get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_relu.txt")\ndf25 = read.csv("output/p0.250000_relu.txt")\ndf50 = read.csv("output/p0.500000_relu.txt")\ndf75 = read.csv("output/p0.750000_relu.txt")\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$valid_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue")\nlines(df25$valid_loss, col="red")\nlines(df50$valid_loss, col="orange")\nlines(df75$valid_loss, col="green")\n# train plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="train loss", col="blue")\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n')
+
+
+# In[80]:
 
 fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
 fig.tight_layout()
 for i in range(0,4*3):
     plt.subplot(4,3,i)
     plt.figure
-    plt.xlim(-10, 10)
-    plt.ylim(-10, 10)
+    #plt.xlim(-20, 20)
+    plt.ylim(-1, 1)
     plt.ylabel("g(x)")
     plt.xlabel("x")
     plt.plot(
-        models["relu"][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["relu"][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
         "bo",
-        models["relu"][0.25]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["relu"][0.25]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.25]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.25]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
         "ro",
     )
 
 
-# In[207]:
+# In[81]:
 
 fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
 fig.tight_layout()
 for i in range(0,4*3):
     plt.subplot(4,3,i)
-    plt.xlim(-10, 10)
-    plt.ylim(-10, 10)
+    #plt.xlim(-10, 10)
+    plt.ylim(-1, 1)
     plt.ylabel("g(x)")
     plt.xlabel("x")
     plt.plot(
-        models["relu"][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["relu"][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
         "bo",
-        models["relu"][0.5]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["relu"][0.5]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.5]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.5]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
         "ro",        
     )
 
 
-# In[209]:
+# In[82]:
 
 fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
 fig.tight_layout()
 for i in range(0,4*3):
     plt.subplot(4,3,i)
     plt.figure
-    plt.xlim(-10, 10)
-    plt.ylim(-10, 10)
+    #plt.xlim(-10, 10)
+    plt.ylim(-1, 1)
     plt.ylabel("g(x)")
     plt.xlabel("x")
     plt.plot(
-        models["relu"][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["relu"][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
         "bo",
-        models["relu"][0.75]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
-        models["relu"][0.75]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.75]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+        models["tanh"][0.75]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
         "ro",
     )
 
