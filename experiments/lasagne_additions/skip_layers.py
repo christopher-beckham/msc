@@ -158,7 +158,7 @@ deep_net = [
 ]
 
 
-# In[3]:
+# In[50]:
 
 def get_deep_net_light(args):
     l_in = InputLayer( (None, 1, 28, 28))
@@ -186,7 +186,7 @@ def get_deep_net_light(args):
         nonlinearity=args["nonlinearity"],
         p=args["p"]
     )                                    
-    l_out = DenseLayer(l_dense, num_units=10, nonlinearity=sigmoid)
+    l_out = DenseLayer(l_dense, num_units=10, nonlinearity=softmax)
     for layer in get_all_layers(l_out):
         if isinstance(layer, SkippableNonlinearityLayer):
             continue
@@ -195,7 +195,7 @@ def get_deep_net_light(args):
     return l_out
 
 
-# In[4]:
+# In[49]:
 
 def get_deep_net(args):
     l_in = InputLayer( (None, 1, 28, 28))
@@ -223,7 +223,7 @@ def get_deep_net(args):
         nonlinearity=args["nonlinearity"],
         p=args["p"]
     )                                    
-    l_out = DenseLayer(l_dense, num_units=10, nonlinearity=sigmoid)
+    l_out = DenseLayer(l_dense, num_units=10, nonlinearity=softmax)
     for layer in get_all_layers(l_out):
         if isinstance(layer, SkippableNonlinearityLayer):
             continue
@@ -232,7 +232,32 @@ def get_deep_net(args):
     return l_out
 
 
-# In[5]:
+# In[46]:
+
+def get_basic_net(args):
+    l_in = InputLayer( (None, 1, 28, 28))
+    l_prev = l_in
+    for i in range(0, 1):
+        l_prev = Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=args["nonlinearity"])
+        l_prev = MaxPool2DLayer(l_prev, pool_size=2)
+    for i in range(0, 1):
+        l_prev = Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=args["nonlinearity"])
+        l_prev = MaxPool2DLayer(l_prev, pool_size=2)
+    for i in range(0, 1):
+        l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=args["nonlinearity"])
+        l_prev = MaxPool2DLayer(l_prev, pool_size=2)
+    l_dense = DenseLayer(l_prev, num_units=128, nonlinearity=args["nonlinearity"])
+    
+    l_out = DenseLayer(l_dense, num_units=10, nonlinearity=softmax)
+    for layer in get_all_layers(l_out):
+        if isinstance(layer, SkippableNonlinearityLayer):
+            continue
+        sys.stderr.write("%s,%s\n" % (layer, layer.output_shape))
+    sys.stderr.write(str(count_params(l_out)) + "\n")
+    return l_out
+
+
+# In[29]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -266,11 +291,13 @@ def get_net(l_out, data, args={}):
     # this is meant to be non-deterministic
     preds = T.argmax(net_out,axis=1)
     preds_fn = theano.function(inputs=[], outputs=preds, givens={X:X_valid})
+    # this is also meant to be non-deterministic
+    out_fn = theano.function(inputs=[], outputs=net_out, givens={X:X_valid})
 
     tmp_fn = theano.function([X], net_out)
     outs_with_nonlinearity = theano.function(
         [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
-              if isinstance(layer, SkippableNonlinearityLayer) ]
+              if isinstance(layer, SkippableNonlinearityLayer) ], on_unused_input="warn"
     )
     outs_without_nonlinearity = theano.function(
         [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
@@ -281,6 +308,7 @@ def get_net(l_out, data, args={}):
         "acc_fn": acc_fn,
         "preds_fn": preds_fn,
         "loss_fn": loss_fn,
+        "out_fn": out_fn,
         "outs_with_nonlinearity": outs_with_nonlinearity,
         "outs_without_nonlinearity": outs_without_nonlinearity,
         "l_out": l_out,
@@ -331,7 +359,7 @@ def iterate(X_train, y_train, batch_size):
         yield X_batch, y_batch
 
 
-# In[7]:
+# In[19]:
 
 def train(net_cfg, 
           num_epochs,
@@ -362,6 +390,8 @@ def train(net_cfg,
     for epoch in range(0, num_epochs):
         this_train_losses = []
         np.random.shuffle(idxs)
+        #if debug:
+        #    sys.stderr.write("%s\n" % idxs)
         t0 = time()
         for i in range(0, len(idxs)):
             loss_for_this_batch = train_fn( idxs[i] )
@@ -417,7 +447,7 @@ dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 # Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
 
-# In[11]:
+# In[53]:
 
 dummy_net = get_net(
     l_out=get_deep_net_light({"p": 0.0, "nonlinearity": tanh}), 
@@ -426,31 +456,12 @@ dummy_net = get_net(
 )
 train(
     net_cfg=dummy_net,
-    num_epochs=50,
-    data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal)
+    num_epochs=10,
+    data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
 )
-
-
-# In[14]:
-
-dummy_net.keys()
 
 
 # ----
-
-# In[ ]:
-
-dummy_net = get_net(
-    l_out=get_deep_net_light({"p": 0.0, "nonlinearity": tanh}), 
-    data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
-    args={"batch_size": 10, "max_norm": 10}
-)
-train(
-    net_cfg=dummy_net,
-    num_epochs=50,
-    data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal)
-)
-
 
 # In[16]:
 
