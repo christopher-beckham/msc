@@ -124,6 +124,28 @@ class SkippableNonlinearityLayer(Layer):
             
 
 
+# In[22]:
+
+class MoreSkippableNonlinearityLayer(Layer):
+    def __init__(self, incoming, nonlinearity=rectify, p=0.5, max_=10,
+                 **kwargs):
+        super(MoreSkippableNonlinearityLayer, self).__init__(incoming, **kwargs)
+        self.nonlinearity = (identity if nonlinearity is None
+                             else nonlinearity)
+        self._srng = RandomStreams(get_rng().randint(1, 2147462579))
+        self.p = p
+        self.max_ = max_
+
+    def get_output_for(self, input, deterministic=False, **kwargs):
+        if deterministic and self.p == 0.0:
+            # apply the bernoulli expectation
+            return self.p*input + (1-self.p)*self.nonlinearity(input)
+        else:
+            mask = self._srng.binomial(n=1, p=(self.p), size=input.shape,
+                dtype=input.dtype)
+            return mask*input + (1-mask)*self.nonlinearity(input) 
+
+
 # In[89]:
 
 shallow_net = [
@@ -159,9 +181,9 @@ deep_net = [
 ]
 
 
-# In[16]:
+# In[18]:
 
-def get_deep_net_light(args):
+def get_deep_net_light(args, custom_layer=SkippableNonlinearityLayer):
     if "dropout" in args:
         sys.stderr.write("using dropout instead of skippable nonlinearity...\n")
     l_in = InputLayer( (None, 1, 28, 28))
@@ -169,25 +191,25 @@ def get_deep_net_light(args):
     for i in range(0, 3):
         l_prev = Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
-            l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+            l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
     for i in range(0, 6):
         l_prev = Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
-            l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+            l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
     for i in range(0, 4):
         l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
-            l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+            l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
             
     l_dense = DenseLayer(l_prev, num_units=128, nonlinearity=linear)       
     if "dropout" not in args:
-        l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+        l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
     else:
         l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
     
     l_out = DenseLayer(l_prev, num_units=10, nonlinearity=softmax) # in used to be l_dense
     for layer in get_all_layers(l_out):
-        if isinstance(layer, SkippableNonlinearityLayer) or isinstance(layer, NonlinearityLayer):
+        if isinstance(layer, custom_layer) or isinstance(layer, NonlinearityLayer):
             continue
         sys.stderr.write("%s,%s\n" % (layer, layer.output_shape))
     sys.stderr.write(str(count_params(l_out)) + "\n")
@@ -452,10 +474,10 @@ dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 # Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
 
-# In[13]:
+# In[24]:
 
 dummy_net = get_net(
-    l_out=get_deep_net_light({"p": 0.5, "nonlinearity": tanh}), 
+    l_out=get_deep_net_light({"p": 0.25, "nonlinearity": tanh}, custom_layer=MoreSkippableNonlinearityLayer), 
     data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
     args={"batch_size": 10}
 )
@@ -468,7 +490,7 @@ train(
 
 # ---
 
-# In[44]:
+# In[27]:
 
 skip_check = True
 
@@ -548,8 +570,9 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
 
 # Do five replicates of tanh(0.5), relu(0.5), tanh_dropout(0.5), and relu_dropout(0.5)
 
-# In[49]:
+# In[25]:
 
+"""
 if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
     for x in range(0, 5):
         for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
@@ -570,12 +593,32 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
                     out_file="output_replicate/p%f_%s_dropout%i.%i" % (0.5, nonlinearity[0], dropout, x),
                     debug=False
                 )
+"""
 
 
 # Caveats about prelim exps:
 # * Using lightweight deep network
 # 
 # * We would expect the stochastic nonlinearity to take relatively longer to train, because we are training an ensemble of networks (analogous to dropout)
+
+# In[28]:
+
+if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
+    for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+        for p in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]:
+            np.random.seed(0)
+            train(
+                get_net(
+                    get_deep_net_light({"p":p, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128}
+                ),
+                num_epochs=20,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file="output_more/p%f_%s" % (p, nonlinearity[0]),
+                debug=False
+            )
+
 
 # -----
 
