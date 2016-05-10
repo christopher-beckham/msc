@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[3]:
 
 import theano
 from theano import tensor as T
@@ -80,7 +80,7 @@ print (mask * T.ones((10,8,26,26))).eval()
 """
 
 
-# In[2]:
+# In[4]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, max_=10,
@@ -159,7 +159,7 @@ deep_net = [
 ]
 
 
-# In[3]:
+# In[16]:
 
 def get_deep_net_light(args):
     if "dropout" in args:
@@ -170,20 +170,14 @@ def get_deep_net_light(args):
         l_prev = Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
             l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
-        else:
-            l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
     for i in range(0, 6):
         l_prev = Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
             l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
-        else:
-            l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
     for i in range(0, 4):
         l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
             l_prev = SkippableNonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
-        else:
-            l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
             
     l_dense = DenseLayer(l_prev, num_units=128, nonlinearity=linear)       
     if "dropout" not in args:
@@ -191,7 +185,7 @@ def get_deep_net_light(args):
     else:
         l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
     
-    l_out = DenseLayer(l_dense, num_units=10, nonlinearity=softmax)
+    l_out = DenseLayer(l_prev, num_units=10, nonlinearity=softmax) # in used to be l_dense
     for layer in get_all_layers(l_out):
         if isinstance(layer, SkippableNonlinearityLayer) or isinstance(layer, NonlinearityLayer):
             continue
@@ -458,10 +452,10 @@ dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 # Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
 
-# In[127]:
+# In[13]:
 
 dummy_net = get_net(
-    l_out=get_deep_net_light({"p": 0.5, "dropout": True, "nonlinearity": tanh}), 
+    l_out=get_deep_net_light({"p": 0.5, "nonlinearity": tanh}), 
     data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
     args={"batch_size": 10}
 )
@@ -480,6 +474,8 @@ skip_check = True
 
 
 # In this experiment we vary $p$
+# 
+# CAVEAT: skippable nonlinearity was not added to the dense layer before the final
 
 # In[121]:
 
@@ -529,8 +525,9 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
 
 # In this experiment we play with $p$ but for dropout (do no gradient clipping in this one... we probably won't need it)
 
-# In[128]:
+# In[15]:
 
+"""
 if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
     for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
         for p in [0.1, 0.25, 0.5, 0.75]:
@@ -546,6 +543,7 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
                 out_file="output/p%f_%s_dropout" % (p, nonlinearity[0]),
                 debug=False
             )
+"""
 
 
 # Do five replicates of tanh(0.5), relu(0.5), tanh_dropout(0.5), and relu_dropout(0.5)
