@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[117]:
+# In[1]:
 
 import theano
 from theano import tensor as T
@@ -159,7 +159,7 @@ deep_net = [
 ]
 
 
-# In[125]:
+# In[3]:
 
 def get_deep_net_light(args):
     if "dropout" in args:
@@ -200,7 +200,7 @@ def get_deep_net_light(args):
     return l_out
 
 
-# In[49]:
+# In[4]:
 
 def get_deep_net(args):
     l_in = InputLayer( (None, 1, 28, 28))
@@ -237,7 +237,7 @@ def get_deep_net(args):
     return l_out
 
 
-# In[85]:
+# In[5]:
 
 def get_basic_net(args):
     l_in = InputLayer( (None, 1, 28, 28))
@@ -262,7 +262,7 @@ def get_basic_net(args):
     return l_out
 
 
-# In[119]:
+# In[6]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -328,7 +328,7 @@ def get_net(l_out, data, args={}):
     }
 
 
-# In[10]:
+# In[7]:
 
 train_data, valid_data, _ = hp.load_mnist("../../data/mnist.pkl.gz")
 X_train, y_train = train_data
@@ -370,7 +370,7 @@ def iterate(X_train, y_train, batch_size):
         yield X_batch, y_batch
 
 
-# In[19]:
+# In[8]:
 
 def train(net_cfg, 
           num_epochs,
@@ -474,7 +474,7 @@ train(
 
 # ---
 
-# In[16]:
+# In[44]:
 
 skip_check = True
 
@@ -548,23 +548,42 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
             )
 
 
+# Do five replicates of tanh(0.5), relu(0.5), tanh_dropout(0.5), and relu_dropout(0.5)
+
+# In[49]:
+
+if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
+    for x in range(0, 5):
+        for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+            for dropout in [True, False]:
+                np.random.seed(x)
+                print "output_replicate/p%f_%s_dropout%i.%i" % (0.5, nonlinearity[0], dropout, x) 
+                get_net_args = {"batch_size": 128}
+                if dropout == False:
+                    get_net_args["max_norm"] = 2
+                train(
+                    get_net(
+                        get_deep_net_light({"p":0.5, "dropout": dropout, "nonlinearity": nonlinearity[1]}),
+                        (X_train, y_train, X_valid, y_valid), 
+                        get_net_args
+                    ),
+                    num_epochs=30,
+                    data=(X_train, y_train, X_valid, y_valid),
+                    out_file="output_replicate/p%f_%s_dropout%i.%i" % (0.5, nonlinearity[0], dropout, x),
+                    debug=False
+                )
+
+
 # Caveats about prelim exps:
 # * Using lightweight deep network
 # 
 # * We would expect the stochastic nonlinearity to take relatively longer to train, because we are training an ensemble of networks (analogous to dropout)
 
-# In[50]:
-
-plt.plot(train_losses_without_id, "b-", train_losses_with_id, "r-")
-plt.xlabel("# epochs")
-plt.ylabel("train loss")
-
-
 # -----
 
 # Ok, let's look at all the tanh models
 
-# In[101]:
+# In[39]:
 
 models = dict()
 for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
@@ -583,17 +602,24 @@ for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
 
 # Compare the tanh and relu models with the baseline
 
-# In[103]:
+# In[12]:
 
-get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_tanh.txt")\ndf25 = read.csv("output/p0.250000_tanh.txt")\ndf50 = read.csv("output/p0.500000_tanh.txt")\ndf75 = read.csv("output/p0.750000_tanh.txt")\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$valid_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue", ylim=c(0, max(df75$valid_loss)))\nlines(df25$valid_loss, col="red")\nlines(df50$valid_loss, col="orange")\nlines(df75$valid_loss, col="green")\n# train plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="train loss", col="blue", ylim=c(0, max(df75$train_loss)))\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n')
-
-
-# In[104]:
-
-get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_relu.txt")\ndf25 = read.csv("output/p0.250000_relu.txt")\ndf50 = read.csv("output/p0.500000_relu.txt")\ndf75 = read.csv("output/p0.750000_relu.txt")\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$valid_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue", ylim=c(0, max(df75$valid_loss)))\nlines(df25$valid_loss, col="red")\nlines(df50$valid_loss, col="orange")\nlines(df75$valid_loss, col="green")\n# train plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="train loss", col="blue", ylim=c(0, max(df75$train_loss)))\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n')
+get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_tanh.txt")\ndf25 = read.csv("output/p0.250000_tanh.txt")\ndf50 = read.csv("output/p0.500000_tanh.txt")\ndf75 = read.csv("output/p0.750000_tanh.txt")\n\nmax_train_loss = max( c(max(dfb$train_loss), max(df25$train_loss), max(df50$train_loss), max(df75$train_loss) ) )\nmax_valid_loss = max( c(max(dfb$valid_loss), max(df25$valid_loss), max(df50$valid_loss), max(df75$valid_loss) ) )\n\npar(mfrow=c(1,2))\n# valid plots\nplot(dfb$valid_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue", ylim=c(0, max_valid_loss))\nlines(df25$valid_loss, col="red")\nlines(df50$valid_loss, col="orange")\nlines(df75$valid_loss, col="green")\n# train plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="train loss", col="blue", ylim=c(0, max_train_loss))\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n')
 
 
-# In[106]:
+# In[13]:
+
+get_ipython().run_cell_magic(u'R', u'', u'dfb = read.csv("output/p0.000000_relu.txt")\ndf25 = read.csv("output/p0.250000_relu.txt")\ndf50 = read.csv("output/p0.500000_relu.txt")\ndf75 = read.csv("output/p0.750000_relu.txt")\npar(mfrow=c(1,2))\n\nmax_train_loss = max( c(max(dfb$train_loss), max(df25$train_loss), max(df50$train_loss), max(df75$train_loss) ) )\nmax_valid_loss = max( c(max(dfb$valid_loss), max(df25$valid_loss), max(df50$valid_loss), max(df75$valid_loss) ) )\n\n# valid plots\nplot(dfb$valid_loss, type="l", xlab="# epochs", ylab="valid loss", col="blue", ylim=c(0, max_valid_loss))\nlines(df25$valid_loss, col="red")\nlines(df50$valid_loss, col="orange")\nlines(df75$valid_loss, col="green")\n# train plots\nplot(dfb$train_loss, type="l", xlab="# epochs", ylab="train loss", col="blue", ylim=c(0, max_train_loss))\nlines(df25$train_loss, col="red")\nlines(df50$train_loss, col="orange")\nlines(df75$train_loss, col="green")\n')
+
+
+# Compare dropout without dropout
+
+# In[37]:
+
+get_ipython().run_cell_magic(u'R', u'', u'files = c(\n    "p0.100000_tanh",\n    "p0.250000_tanh",\n    "p0.500000_tanh",\n    "p0.750000_tanh",\n    "p0.100000_relu",\n    "p0.250000_relu",\n    "p0.500000_relu",\n    "p0.750000_relu"\n)\n\nplot_result = function(filename) {\n    par(mfrow=c(1,2))\n    df0 = read.csv(paste("output/",filename,".txt",sep=""))\n    df0d = read.csv(paste("output/",filename,"_dropout.txt",sep=""))\n    max_train_loss = max( c(max(df0$train_loss), max(df0d$train_loss)) )\n    max_valid_loss = max( c(max(df0$valid_loss), max(df0d$valid_loss)) )\n    plot(df0$train_loss, type="l", col="blue", xlab="# epochs",\n         ylab="train loss", main=filename, ylim=c(0, max_train_loss))\n    lines(df0d$train_loss, type="l", col="red")\n    plot(df0$valid_loss, type="l", col="blue", xlab="# epochs",\n         ylab="valid loss", main=filename, ylim=c(0, max_valid_loss))\n    lines(df0d$valid_loss, type="l", col="red")    \n}\n\n\nfor( i in 1:length(files)) {\n    plot_result(files[i])\n}')
+
+
+# In[40]:
 
 for nonlinearity in ["tanh", "relu"]:
     for p in [0.1, 0.25, 0.5, 0.75]:
@@ -626,45 +652,6 @@ for nonlinearity in ["tanh", "relu"]:
 #    * For relu, when $x > 0$, $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 1 \cdot x$ no matter if relu or identity is used. If $x < 0$, then for relu $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 0 \cdot x$, but then if identity is used $\frac{\partial g(Wx)}{\partial Wx} \cdot \frac{\partial Wx}{\partial W} = 1 \cdot x$, giving it a gradient and potentially "un-killing" neurons.
 
 # ----
-
-# In[181]:
-
-plt.figure(figsize=(8,6))
-for i in range(0,4):
-    plt.subplot(2,2,i)
-    plt.xlim(-4, 4)
-    plt.ylim(-2, 2)
-    plt.plot(
-        no_id_net["outs_without_nonlinearity"](X_train[0:100])[i].flatten(),
-        no_id_net["outs_with_nonlinearity"](X_train[0:100])[i].flatten(),
-        "bo",
-        id_net["outs_without_nonlinearity"](X_train[0:100])[i].flatten(),
-        id_net["outs_with_nonlinearity"](X_train[0:100])[i].flatten(),
-        "ro",
-    )
-    plt.ylabel("g(x)")
-    plt.xlabel("x")
-
-
-# In[49]:
-
-get_ipython().magic(u'Rpush train_losses')
-
-
-# In[51]:
-
-train_losses_2 =     train(X_train, y_train, X_valid, y_valid, get_net({"p":0}), num_epochs=7, bs=32)
-
-
-# In[52]:
-
-get_ipython().magic(u'Rpush train_losses_2')
-
-
-# In[59]:
-
-get_ipython().run_cell_magic(u'R', u'', u'plot(train_losses_2, type="l", col="red")\nlines(train_losses, col="blue")')
-
 
 # In[ ]:
 
