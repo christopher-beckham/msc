@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[3]:
+# In[1]:
 
 import theano
 from theano import tensor as T
@@ -240,6 +240,40 @@ def get_deep_net_light_with_dense(args, custom_layer=SkippableNonlinearityLayer)
     if "dropout" not in args:
         l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
     else:
+        l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
+    
+    l_out = DenseLayer(l_prev, num_units=10, nonlinearity=softmax) # in used to be l_dense
+    for layer in get_all_layers(l_out):
+        if isinstance(layer, custom_layer) or isinstance(layer, NonlinearityLayer):
+            continue
+        sys.stderr.write("%s,%s\n" % (layer, layer.output_shape))
+    sys.stderr.write(str(count_params(l_out)) + "\n")
+    return l_out
+
+
+# In[4]:
+
+def get_deep_net_light_with_dense_2(args, custom_layer=SkippableNonlinearityLayer):
+    if "dropout" in args:
+        sys.stderr.write("using dropout instead of skippable nonlinearity...\n")
+    l_in = InputLayer( (None, 1, 28, 28))
+    l_prev = l_in
+    for i in range(0, 3):
+        l_prev = Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=linear)
+        if "dropout" not in args:
+            l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+    for i in range(0, 6):
+        l_prev = Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=linear)
+        if "dropout" not in args:
+            l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+    for i in range(0, 3):
+        l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=linear)
+        if "dropout" not in args:
+            l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])          
+    l_prev = DenseLayer(l_prev, num_units=128, nonlinearity=linear)       
+    if "dropout" not in args:
+        l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+    elif args["dropout"] == True:
         l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
     
     l_out = DenseLayer(l_prev, num_units=10, nonlinearity=softmax) # in used to be l_dense
@@ -646,7 +680,7 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
 
 # In[52]:
 
-if False:
+if "MORE_SKIPPABLE_1" in os.environ:
     if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
         for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
             for p in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]:
@@ -666,7 +700,7 @@ if False:
 
 # In[55]:
 
-if False:
+if "MORE_SKIPPABLE_2" in os.environ:
     if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
         for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
             for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
@@ -688,7 +722,7 @@ if False:
 
 # In[ ]:
 
-if True:
+if "MORE_SKIPPABLE_3" in os.environ:
     if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
         for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
             for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
@@ -706,9 +740,9 @@ if True:
                 )
 
 
-# In[ ]:
+# In[3]:
 
-if True:
+if "MORE_SKIPPABLE_4" in os.environ:
     if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
         for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
             for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
@@ -722,6 +756,33 @@ if True:
                     num_epochs=20,
                     data=(X_train, y_train, X_valid, y_valid),
                     out_file="output_more/p%f_%s_with_dense_dropout" % (p, nonlinearity[0]),
+                    debug=False
+                )
+
+
+# In[5]:
+
+if "MORE_SKIPPABLE_5" in os.environ:
+    for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+        for p in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]:
+            for d in [True, False]:
+                if p == 0.0 and d == True:
+                    continue
+                np.random.seed(0)
+                if d == True:
+                    out_file_name = "output_more_2/p%f_%s_with_dense_dropout" % (p, nonlinearity[0])
+                else:
+                    out_file_name = "output_more_2/p%f_%s_with_dense" % (p, nonlinearity[0])
+                train(
+                    get_net(
+                        get_deep_net_light_with_dense(
+                            {"p":p, "dropout": d, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+                        (X_train, y_train, X_valid, y_valid), 
+                        {"batch_size": 128}
+                    ),
+                    num_epochs=20,
+                    data=(X_train, y_train, X_valid, y_valid),
+                    out_file=out_file_name,
                     debug=False
                 )
 
