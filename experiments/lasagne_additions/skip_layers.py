@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[7]:
 
 import theano
 from theano import tensor as T
@@ -80,7 +80,7 @@ print (mask * T.ones((10,8,26,26))).eval()
 """
 
 
-# In[4]:
+# In[8]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, max_=10,
@@ -124,7 +124,7 @@ class SkippableNonlinearityLayer(Layer):
             
 
 
-# In[22]:
+# In[9]:
 
 class MoreSkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, max_=10,
@@ -251,7 +251,7 @@ def get_deep_net_light_with_dense(args, custom_layer=SkippableNonlinearityLayer)
     return l_out
 
 
-# In[4]:
+# In[16]:
 
 def get_deep_net_light_with_dense_2(args, custom_layer=SkippableNonlinearityLayer):
     if "dropout" in args:
@@ -273,7 +273,7 @@ def get_deep_net_light_with_dense_2(args, custom_layer=SkippableNonlinearityLaye
     l_prev = DenseLayer(l_prev, num_units=128, nonlinearity=linear)       
     if "dropout" not in args:
         l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
-    elif args["dropout"] == True:
+    else:
         l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
     
     l_out = DenseLayer(l_prev, num_units=10, nonlinearity=softmax) # in used to be l_dense
@@ -352,7 +352,7 @@ def get_basic_net(args):
     return l_out
 
 
-# In[47]:
+# In[11]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -419,7 +419,7 @@ def get_net(l_out, data, args={}):
     }
 
 
-# In[7]:
+# In[12]:
 
 train_data, valid_data, _ = hp.load_mnist("../../data/mnist.pkl.gz")
 X_train, y_train = train_data
@@ -461,7 +461,7 @@ def iterate(X_train, y_train, batch_size):
         yield X_batch, y_batch
 
 
-# In[8]:
+# In[13]:
 
 def train(net_cfg, 
           num_epochs,
@@ -549,10 +549,10 @@ dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 # Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
 
-# In[53]:
+# In[15]:
 
 dummy_net = get_net(
-    l_out=get_deep_net_light({"p": 0.25, "dropout": True, "nonlinearity": tanh}, custom_layer=MoreSkippableNonlinearityLayer), 
+    l_out=get_deep_net_light_with_dense_2({"p": 0.25, "nonlinearity": tanh}, custom_layer=MoreSkippableNonlinearityLayer), 
     data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
     args={"batch_size": 10}
 )
@@ -760,7 +760,7 @@ if "MORE_SKIPPABLE_4" in os.environ:
                 )
 
 
-# In[5]:
+# In[17]:
 
 if "MORE_SKIPPABLE_5" in os.environ:
     for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
@@ -773,10 +773,12 @@ if "MORE_SKIPPABLE_5" in os.environ:
                     out_file_name = "output_more_2/p%f_%s_with_dense_dropout" % (p, nonlinearity[0])
                 else:
                     out_file_name = "output_more_2/p%f_%s_with_dense" % (p, nonlinearity[0])
+                net_args = {"p":p, "nonlinearity": nonlinearity[1]}
+                if d == True:
+                    net_args["dropout"] = True
                 train(
                     get_net(
-                        get_deep_net_light_with_dense(
-                            {"p":p, "dropout": d, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+                        get_deep_net_light_with_dense_2(net_args, custom_layer=MoreSkippableNonlinearityLayer),
                         (X_train, y_train, X_valid, y_valid), 
                         {"batch_size": 128}
                     ),
