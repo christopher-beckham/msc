@@ -181,7 +181,7 @@ deep_net = [
 ]
 
 
-# In[18]:
+# In[51]:
 
 def get_deep_net_light(args, custom_layer=SkippableNonlinearityLayer):
     if "dropout" in args:
@@ -201,7 +201,7 @@ def get_deep_net_light(args, custom_layer=SkippableNonlinearityLayer):
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
             
-    l_dense = DenseLayer(l_prev, num_units=128, nonlinearity=linear)       
+    #l_dense = DenseLayer(l_prev, num_units=128, nonlinearity=linear)       
     if "dropout" not in args:
         l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
     else:
@@ -278,7 +278,7 @@ def get_basic_net(args):
     return l_out
 
 
-# In[6]:
+# In[47]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -324,7 +324,8 @@ def get_net(l_out, data, args={}):
     tmp_fn = theano.function([X], net_out)
     outs_with_nonlinearity = theano.function(
         [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
-              if isinstance(layer, SkippableNonlinearityLayer) ], on_unused_input="warn"
+              if isinstance(layer, SkippableNonlinearityLayer) or \
+                  isinstance(layer, MoreSkippableNonlinearityLayer) ], on_unused_input="warn"
     )
     outs_without_nonlinearity = theano.function(
         [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
@@ -601,22 +602,94 @@ if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
 # 
 # * We would expect the stochastic nonlinearity to take relatively longer to train, because we are training an ensemble of networks (analogous to dropout)
 
-# In[28]:
+# ----
 
-if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
-    for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
-        for p in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]:
-            np.random.seed(0)
-            train(
-                get_net(
-                    get_deep_net_light({"p":p, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
-                    (X_train, y_train, X_valid, y_valid), 
-                    {"batch_size": 128}
-                ),
-                num_epochs=20,
-                data=(X_train, y_train, X_valid, y_valid),
-                out_file="output_more/p%f_%s" % (p, nonlinearity[0]),
-                debug=False
+# In[52]:
+
+if False:
+    if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
+        for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+            for p in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]:
+                np.random.seed(0)
+                train(
+                    get_net(
+                        get_deep_net_light({"p":p, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+                        (X_train, y_train, X_valid, y_valid), 
+                        {"batch_size": 128}
+                    ),
+                    num_epochs=20,
+                    data=(X_train, y_train, X_valid, y_valid),
+                    out_file="output_more/p%f_%s" % (p, nonlinearity[0]),
+                    debug=False
+                )
+
+
+# In[ ]:
+
+if True:
+    if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
+        for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+            for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
+                np.random.seed(0)
+                train(
+                    get_net(
+                        get_deep_net_light({"p":p, dropout: True, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+                        (X_train, y_train, X_valid, y_valid), 
+                        {"batch_size": 128}
+                    ),
+                    num_epochs=20,
+                    data=(X_train, y_train, X_valid, y_valid),
+                    out_file="output_more/p%f_%s_dropout" % (p, nonlinearity[0]),
+                    debug=False
+                )
+
+
+# In[39]:
+
+get_ipython().run_cell_magic(u'R', u'', u'files = c(\n    "p0.000000",\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\nrainbows = rainbow(length(files))\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh.txt",sep=""))\n    if(i == 1) {\n        plot(df$train_loss, type="l", col=rainbows[i], xlab="epoch", ylab="train loss")\n    } else {\n        lines(df$train_loss, col=rainbows[i])\n    }\n}\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh.txt",sep=""))\n    if(i == 1) {\n        plot(df$valid_loss, type="l", col=rainbows[i], xlab="epoch", ylab="train loss")\n    } else {\n        lines(df$valid_loss, col=rainbows[i])\n    }\n}')
+
+
+# Let's examine these models
+
+# In[49]:
+
+models2 = dict()
+for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+    models2[ nonlinearity[0] ] = dict()
+    for p in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]:
+        with open("output_more/p%f_%s.model" % (p, nonlinearity[0])) as f:
+            model = pickle.load(f)
+        tmp_net = get_net(
+            get_deep_net_light({"p":0, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+            (X_train, y_train, X_valid, y_valid), 
+            {"batch_size": 128}
+        )
+        models2[ nonlinearity[0] ][p] = tmp_net
+        set_all_param_values(tmp_net["l_out"], model)
+
+
+# In[50]:
+
+for nonlinearity in ["tanh", "relu"]:
+    for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
+        print p, nonlinearity
+        fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8,6))
+        fig.tight_layout()
+        for i in range(0,4*3):
+            plt.subplot(4,3,i)
+            plt.figure
+            #plt.xlim(-20, 20)
+            if nonlinearity == "tanh":
+                plt.ylim(-1, 1)
+            plt.ylabel("g(x)")
+            plt.xlabel("x")
+            plt.plot(
+                models2[nonlinearity][0.0]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+                models2[nonlinearity][0.0]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+                "bo",
+                models2[nonlinearity][p]["outs_without_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+                models2[nonlinearity][p]["outs_with_nonlinearity"](X_train.get_value()[0:100])[i].flatten(),
+                "ro",
             )
 
 
