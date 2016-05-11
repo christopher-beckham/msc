@@ -216,7 +216,7 @@ def get_deep_net_light(args, custom_layer=SkippableNonlinearityLayer):
     return l_out
 
 
-# In[54]:
+# In[21]:
 
 def get_deep_net_light_with_dense(args, custom_layer=SkippableNonlinearityLayer):
     if "dropout" in args:
@@ -227,14 +227,20 @@ def get_deep_net_light_with_dense(args, custom_layer=SkippableNonlinearityLayer)
         l_prev = Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+        else:
+            l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
     for i in range(0, 6):
         l_prev = Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+        else:
+            l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
     for i in range(0, 4):
         l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+        else:
+            l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
             
     l_prev = DenseLayer(l_prev, num_units=64, nonlinearity=linear)       
     if "dropout" not in args:
@@ -244,8 +250,8 @@ def get_deep_net_light_with_dense(args, custom_layer=SkippableNonlinearityLayer)
     
     l_out = DenseLayer(l_prev, num_units=10, nonlinearity=softmax) # in used to be l_dense
     for layer in get_all_layers(l_out):
-        if isinstance(layer, custom_layer) or isinstance(layer, NonlinearityLayer):
-            continue
+        #if isinstance(layer, custom_layer) or isinstance(layer, NonlinearityLayer):
+        #    continue
         sys.stderr.write("%s,%s\n" % (layer, layer.output_shape))
     sys.stderr.write(str(count_params(l_out)) + "\n")
     return l_out
@@ -549,18 +555,18 @@ dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 # Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
 
-# In[15]:
+# In[22]:
 
 dummy_net = get_net(
-    l_out=get_deep_net_light_with_dense_2({"p": 0.25, "nonlinearity": tanh}, custom_layer=MoreSkippableNonlinearityLayer), 
+    l_out=get_deep_net_light_with_dense({"p": 0.25, "dropout": True, "nonlinearity": tanh}, custom_layer=MoreSkippableNonlinearityLayer), 
     data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
     args={"batch_size": 10}
 )
-train(
-    net_cfg=dummy_net,
-    num_epochs=10,
-    data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
-)
+#train(
+#    net_cfg=dummy_net,
+#    num_epochs=10,
+#    data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
+#)
 
 
 # ---
