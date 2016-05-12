@@ -12,6 +12,16 @@ get_ipython().magic(u'matplotlib inline')
 import numpy as np
 
 
+# In[59]:
+
+import theano
+
+
+# In[69]:
+
+print theano.config.device
+
+
 # In[6]:
 
 dat = deep_residual_learning_CIFAR10.load_data()

@@ -726,44 +726,42 @@ if "MORE_SKIPPABLE_2" in os.environ:
 
 # start from here
 
-# In[ ]:
+# In[24]:
 
 if "MORE_SKIPPABLE_3" in os.environ:
-    if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
-        for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
-            for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
-                np.random.seed(0)
-                train(
-                    get_net(
-                        get_deep_net_light_with_dense({"p":p, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
-                        (X_train, y_train, X_valid, y_valid), 
-                        {"batch_size": 128}
-                    ),
-                    num_epochs=20,
-                    data=(X_train, y_train, X_valid, y_valid),
-                    out_file="output_more/p%f_%s_with_dense" % (p, nonlinearity[0]),
-                    debug=False
-                )
+    for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+        for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
+            np.random.seed(0)
+            train(
+                get_net(
+                    get_deep_net_light_with_dense({"p":p, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128}
+                ),
+                num_epochs=20,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file="output_more/p%f_%s_with_dense" % (p, nonlinearity[0]),
+                debug=False
+            )
 
 
-# In[3]:
+# In[23]:
 
 if "MORE_SKIPPABLE_4" in os.environ:
-    if skip_check or os.environ["HOSTNAME"] == "cuda4.rdgi.polymtl.ca":
-        for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
-            for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
-                np.random.seed(0)
-                train(
-                    get_net(
-                        get_deep_net_light_with_dense({"p":p, "dropout": True, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
-                        (X_train, y_train, X_valid, y_valid), 
-                        {"batch_size": 128}
-                    ),
-                    num_epochs=20,
-                    data=(X_train, y_train, X_valid, y_valid),
-                    out_file="output_more/p%f_%s_with_dense_dropout" % (p, nonlinearity[0]),
-                    debug=False
-                )
+    for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+        for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
+            np.random.seed(0)
+            train(
+                get_net(
+                    get_deep_net_light_with_dense({"p":p, "dropout": True, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128}
+                ),
+                num_epochs=20,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file="output_more/p%f_%s_with_dense_dropout" % (p, nonlinearity[0]),
+                debug=False
+            )
 
 
 # In[17]:
