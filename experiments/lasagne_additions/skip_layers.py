@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[7]:
+# In[2]:
 
 import theano
 from theano import tensor as T
@@ -93,7 +93,7 @@ class SkippableNonlinearityLayer(Layer):
         self.max_ = max_
 
     def get_output_for(self, input, deterministic=False, **kwargs):
-        if deterministic and self.p == 0.0:
+        if deterministic or self.p == 0.0:
             # apply the bernoulli expectation
             return self.p*input + (1-self.p)*self.nonlinearity(input)
         else:
@@ -137,7 +137,7 @@ class MoreSkippableNonlinearityLayer(Layer):
         self.max_ = max_
 
     def get_output_for(self, input, deterministic=False, **kwargs):
-        if deterministic and self.p == 0.0:
+        if deterministic or self.p == 0.0:
             # apply the bernoulli expectation
             return self.p*input + (1-self.p)*self.nonlinearity(input)
         else:
@@ -216,7 +216,7 @@ def get_deep_net_light(args, custom_layer=SkippableNonlinearityLayer):
     return l_out
 
 
-# In[21]:
+# In[10]:
 
 def get_deep_net_light_with_dense(args, custom_layer=SkippableNonlinearityLayer):
     if "dropout" in args:
@@ -729,39 +729,41 @@ if "MORE_SKIPPABLE_2" in os.environ:
 # In[24]:
 
 if "MORE_SKIPPABLE_3" in os.environ:
-    for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+    for replicate in [1,2]:
         for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
-            np.random.seed(0)
-            train(
-                get_net(
-                    get_deep_net_light_with_dense({"p":p, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
-                    (X_train, y_train, X_valid, y_valid), 
-                    {"batch_size": 128}
-                ),
-                num_epochs=20,
-                data=(X_train, y_train, X_valid, y_valid),
-                out_file="output_more/p%f_%s_with_dense" % (p, nonlinearity[0]),
-                debug=False
-            )
+            for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+                np.random.seed(replicate)
+                train(
+                    get_net(
+                        get_deep_net_light_with_dense({"p":p, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+                        (X_train, y_train, X_valid, y_valid), 
+                        {"batch_size": 128}
+                    ),
+                    num_epochs=20,
+                    data=(X_train, y_train, X_valid, y_valid),
+                    out_file="output_more/p%f_%s_with_dense.%i" % (p, nonlinearity[0], replicate),
+                    debug=False
+                )
 
 
-# In[23]:
+# In[22]:
 
 if "MORE_SKIPPABLE_4" in os.environ:
-    for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+    for replicate in [1,2]:
         for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
-            np.random.seed(0)
-            train(
-                get_net(
-                    get_deep_net_light_with_dense({"p":p, "dropout": True, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
-                    (X_train, y_train, X_valid, y_valid), 
-                    {"batch_size": 128}
-                ),
-                num_epochs=20,
-                data=(X_train, y_train, X_valid, y_valid),
-                out_file="output_more/p%f_%s_with_dense_dropout" % (p, nonlinearity[0]),
-                debug=False
-            )
+            for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+                np.random.seed(replicate)
+                train(
+                    get_net(
+                        get_deep_net_light_with_dense({"p":p, "dropout": True, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+                        (X_train, y_train, X_valid, y_valid), 
+                        {"batch_size": 128}
+                    ),
+                    num_epochs=20,
+                    data=(X_train, y_train, X_valid, y_valid),
+                    out_file="output_more/p%f_%s_with_dense_dropout.%i" % (p, nonlinearity[0], replicate),
+                    debug=False
+                )
 
 
 # In[17]:
@@ -793,23 +795,33 @@ if "MORE_SKIPPABLE_5" in os.environ:
                 )
 
 
-# In[39]:
+# In[27]:
 
-get_ipython().run_cell_magic(u'R', u'', u'files = c(\n    "p0.000000",\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\nrainbows = rainbow(length(files))\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh.txt",sep=""))\n    if(i == 1) {\n        plot(df$train_loss, type="l", col=rainbows[i], xlab="epoch", ylab="train loss")\n    } else {\n        lines(df$train_loss, col=rainbows[i])\n    }\n}\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh.txt",sep=""))\n    if(i == 1) {\n        plot(df$valid_loss, type="l", col=rainbows[i], xlab="epoch", ylab="train loss")\n    } else {\n        lines(df$valid_loss, col=rainbows[i])\n    }\n}')
+get_ipython().run_cell_magic(u'R', u'', u'files = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\nrainbows = rainbow(length(files))\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh_with_dense.txt",sep=""))\n    if(i == 1) {\n        plot(df$train_loss, type="l", col=rainbows[i], xlab="epoch", ylab="train loss")\n    } else {\n        lines(df$train_loss, col=rainbows[i])\n    }\n}\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh_with_dense.txt",sep=""))\n    if(i == 1) {\n        plot(df$valid_loss, type="l", col=rainbows[i], xlab="epoch", ylab="valid loss")\n    } else {\n        lines(df$valid_loss, col=rainbows[i])\n    }\n}')
+
+
+# In[20]:
+
+get_ipython().run_cell_magic(u'R', u'-w 800 -h 600', u'files = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\npar(mfrow=c(2,3))\ndf_baseline = read.csv("output_more/p0.000000_tanh_with_dense.txt")\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh_with_dense.txt",sep=""))\n    df_drop = read.csv(paste("output_more/",files[i],"_tanh_with_dense_dropout.txt",sep=""))\n    #df_baseline = read.csv(paste("output_more/",files[i],"_tanh_with_dense_dropout.txt",sep=""))\n    plot(df$valid_loss, type="l", col="blue", xlab="# epochs", ylab="valid loss", \n         ylim=c(0,0.3), main=files[i])\n    lines(df_drop$valid_loss, col="red")\n    lines(df_baseline$valid_loss, col="black")\n    legend("topright", fill=c("blue", "red", "black"), legend=c("id", "dropout", "none"))\n}')
+
+
+# In[21]:
+
+get_ipython().run_cell_magic(u'R', u'-w 800 -h 600', u'files = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\npar(mfrow=c(2,3))\ndf_baseline = read.csv("output_more/p0.000000_relu_with_dense.txt")\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_relu_with_dense.txt",sep=""))\n    df_drop = read.csv(paste("output_more/",files[i],"_relu_with_dense_dropout.txt",sep=""))\n    plot(df$valid_loss, type="l", col="blue", xlab="# epochs", ylab="valid loss", ylim=c(0,0.3),\n        main=files[i])\n    lines(df_drop$valid_loss, col="red")\n    lines(df_baseline$valid_loss, col="black")\n    legend("topright", fill=c("blue", "red", "black"), legend=c("id", "dropout", "none"))\n}')
 
 
 # Let's examine these models
 
-# In[49]:
+# In[15]:
 
 models2 = dict()
 for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
     models2[ nonlinearity[0] ] = dict()
     for p in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]:
-        with open("output_more/p%f_%s.model" % (p, nonlinearity[0])) as f:
+        with open("output_more/p%f_%s_with_dense.model" % (p, nonlinearity[0])) as f:
             model = pickle.load(f)
         tmp_net = get_net(
-            get_deep_net_light({"p":0, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
+            get_deep_net_light_with_dense({"p":0, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
             (X_train, y_train, X_valid, y_valid), 
             {"batch_size": 128}
         )
@@ -817,7 +829,7 @@ for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
         set_all_param_values(tmp_net["l_out"], model)
 
 
-# In[50]:
+# In[16]:
 
 for nonlinearity in ["tanh", "relu"]:
     for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
