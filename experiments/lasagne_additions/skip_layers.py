@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[2]:
+# In[17]:
 
 import theano
 from theano import tensor as T
@@ -34,6 +34,8 @@ from time import time
 get_ipython().magic(u'load_ext rpy2.ipython')
 
 from scipy import stats
+
+import deep_residual_learning_CIFAR10
 
 
 # In[192]:
@@ -80,7 +82,7 @@ print (mask * T.ones((10,8,26,26))).eval()
 """
 
 
-# In[8]:
+# In[22]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, max_=10,
@@ -124,17 +126,16 @@ class SkippableNonlinearityLayer(Layer):
             
 
 
-# In[9]:
+# In[18]:
 
 class MoreSkippableNonlinearityLayer(Layer):
-    def __init__(self, incoming, nonlinearity=rectify, p=0.5, max_=10,
+    def __init__(self, incoming, nonlinearity=rectify, p=0.5,
                  **kwargs):
         super(MoreSkippableNonlinearityLayer, self).__init__(incoming, **kwargs)
         self.nonlinearity = (identity if nonlinearity is None
                              else nonlinearity)
         self._srng = RandomStreams(get_rng().randint(1, 2147462579))
         self.p = p
-        self.max_ = max_
 
     def get_output_for(self, input, deterministic=False, **kwargs):
         if deterministic or self.p == 0.0:
@@ -144,41 +145,6 @@ class MoreSkippableNonlinearityLayer(Layer):
             mask = self._srng.binomial(n=1, p=(self.p), size=input.shape,
                 dtype=input.dtype)
             return mask*input + (1-mask)*self.nonlinearity(input) 
-
-
-# In[89]:
-
-shallow_net = [
-    ("conv", 3, 16, 1),
-    ("maxpool", 2),
-    ("conv", 3, 32, 1),
-    ("maxpool", 2),
-    ("conv", 3, 64, 1),
-    ("dense", 128)
-]
-
-
-# In[90]:
-
-deep_net = [
-    ("conv", 3, 16, 1),
-    ("conv", 3, 16, 1),
-    ("conv", 3, 16, 1),
-    
-    ("conv", 3, 32, 1),
-    ("conv", 3, 32, 1),
-    ("conv", 3, 32, 1),
-    ("conv", 3, 32, 1),
-    ("conv", 3, 32, 1),
-    ("conv", 3, 32, 1),
-    
-    ("conv", 3, 64, 1),
-    ("conv", 3, 64, 1),
-    ("conv", 3, 64, 1),
-    ("conv", 3, 64, 1),
-    
-    ("dense", 128) 
-]
 
 
 # In[51]:
@@ -257,26 +223,33 @@ def get_deep_net_light_with_dense(args, custom_layer=SkippableNonlinearityLayer)
     return l_out
 
 
-# In[16]:
+# In[30]:
 
-def get_deep_net_light_with_dense_2(args, custom_layer=SkippableNonlinearityLayer):
+def get_deep_net_light_with_dense_for_cifar10(args, custom_layer=SkippableNonlinearityLayer):
     if "dropout" in args:
         sys.stderr.write("using dropout instead of skippable nonlinearity...\n")
-    l_in = InputLayer( (None, 1, 28, 28))
+    l_in = InputLayer( (None, 3, 32, 32))
     l_prev = l_in
     for i in range(0, 3):
         l_prev = Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
-    for i in range(0, 6):
+        else:
+            l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
+    for i in range(0, 5):
         l_prev = Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
-    for i in range(0, 3):
+        else:
+            l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
+    for i in range(0, 7):
         l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=linear)
         if "dropout" not in args:
-            l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])          
-    l_prev = DenseLayer(l_prev, num_units=128, nonlinearity=linear)       
+            l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+        else:
+            l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
+            
+    l_prev = DenseLayer(l_prev, num_units=64, nonlinearity=linear)       
     if "dropout" not in args:
         l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
     else:
@@ -284,8 +257,8 @@ def get_deep_net_light_with_dense_2(args, custom_layer=SkippableNonlinearityLaye
     
     l_out = DenseLayer(l_prev, num_units=10, nonlinearity=softmax) # in used to be l_dense
     for layer in get_all_layers(l_out):
-        if isinstance(layer, custom_layer) or isinstance(layer, NonlinearityLayer):
-            continue
+        #if isinstance(layer, custom_layer) or isinstance(layer, NonlinearityLayer):
+        #    continue
         sys.stderr.write("%s,%s\n" % (layer, layer.output_shape))
     sys.stderr.write(str(count_params(l_out)) + "\n")
     return l_out
@@ -358,7 +331,7 @@ def get_basic_net(args):
     return l_out
 
 
-# In[11]:
+# In[19]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -425,28 +398,63 @@ def get_net(l_out, data, args={}):
     }
 
 
-# In[12]:
+# In[14]:
 
-train_data, valid_data, _ = hp.load_mnist("../../data/mnist.pkl.gz")
-X_train, y_train = train_data
-X_valid, y_valid = valid_data
-# minimal
-X_train_minimal = X_train[0:200]
-y_train_minimal = y_train[0:200]
-# ---
-X_train = theano.shared(np.asarray(X_train, dtype=theano.config.floatX), borrow=True)
-y_train = theano.shared(np.asarray(y_train, dtype=theano.config.floatX), borrow=True)
-X_valid = theano.shared(np.asarray(X_valid, dtype=theano.config.floatX), borrow=True)
-y_valid = theano.shared(np.asarray(y_valid, dtype=theano.config.floatX), borrow=True)
-# minimal
-X_train_minimal = theano.shared(np.asarray(X_train_minimal, dtype=theano.config.floatX), borrow=True)
-y_train_minimal = theano.shared(np.asarray(y_train_minimal, dtype=theano.config.floatX), borrow=True)
-# ---
-#y_train = T.cast(y_train, "int32")
-#y_valid = T.cast(y_valid, "int32")
-# minimal
-#y_train_minimal = T.cast(y_train_minimal, "int32")
-# ---
+if "CIFAR10_EXP_1" not in os.environ:
+    sys.stderr.write("loading mnist...\n")
+    train_data, valid_data, _ = hp.load_mnist("../../data/mnist.pkl.gz")
+    X_train, y_train = train_data
+    X_valid, y_valid = valid_data
+    # minimal
+    X_train_minimal = X_train[0:200]
+    y_train_minimal = y_train[0:200]
+    # ---
+    X_train = theano.shared(np.asarray(X_train, dtype=theano.config.floatX), borrow=True)
+    y_train = theano.shared(np.asarray(y_train, dtype=theano.config.floatX), borrow=True)
+    X_valid = theano.shared(np.asarray(X_valid, dtype=theano.config.floatX), borrow=True)
+    y_valid = theano.shared(np.asarray(y_valid, dtype=theano.config.floatX), borrow=True)
+    # minimal
+    X_train_minimal = theano.shared(np.asarray(X_train_minimal, dtype=theano.config.floatX), borrow=True)
+    y_train_minimal = theano.shared(np.asarray(y_train_minimal, dtype=theano.config.floatX), borrow=True)
+    # ---
+    #y_train = T.cast(y_train, "int32")
+    #y_valid = T.cast(y_valid, "int32")
+    # minimal
+    #y_train_minimal = T.cast(y_train_minimal, "int32")
+    # ---
+else:
+    sys.stderr.write("loading cifar10...\n")
+    dat = deep_residual_learning_CIFAR10.load_data()
+    X_train_and_valid = dat["X_train"]
+    y_train_and_valid = dat["Y_train"]
+    
+    X_train_minimal = theano.shared(X_train_and_valid[0:100].astype(theano.config.floatX), borrow=True)
+    y_train_minimal = theano.shared(y_train_and_valid[0:100].astype(theano.config.floatX), borrow=True)
+    
+    X_test = theano.shared(dat["X_test"].astype(theano.config.floatX), borrow=True)
+    y_test = theano.shared(dat["Y_test"].astype(theano.config.floatX), borrow=True)
+    n = X_train_and_valid.shape[0]
+    X_train = theano.shared(X_train_and_valid[0 : 0.85*n].astype(theano.config.floatX), borrow=True)
+    y_train = theano.shared(y_train_and_valid[0 : 0.85*n].astype(theano.config.floatX), borrow=True)
+    X_valid = theano.shared(X_train_and_valid[0.85*n :: ].astype(theano.config.floatX), borrow=True)
+    y_valid = theano.shared(y_train_and_valid[0.85*n :: ].astype(theano.config.floatX), borrow=True)
+    
+
+
+# In[34]:
+
+"""
+sys.stderr.write("debugging network architecture...\n")
+
+get_net(
+    l_out=get_deep_net_light_with_dense_for_cifar10(
+        {"p": 0.25, "dropout": True, "nonlinearity": tanh},
+        custom_layer=MoreSkippableNonlinearityLayer
+    ), 
+    data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
+    args={"batch_size": 10}
+)
+"""
 
 
 # In[22]:
@@ -536,10 +544,16 @@ def train(net_cfg,
 
 # Let's verify the implementation using a dummy example.
 
-# In[12]:
+# In[33]:
+
+np.eye(5).dtype
+
+
+# In[34]:
 
 def test_this():
     l_in = InputLayer( (None, 5) )
+    # np.eye has dtype float64 default
     l_dense = DenseLayer(l_in, num_units=5, nonlinearity=linear, W=np.eye(5))
     l_id = SkippableNonlinearityLayer(l_dense, nonlinearity=sigmoid)
     X = T.fmatrix()
@@ -766,31 +780,23 @@ if "MORE_SKIPPABLE_4" in os.environ:
                 )
 
 
-# In[17]:
+# In[ ]:
 
-if "MORE_SKIPPABLE_5" in os.environ:
-    for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
-        for p in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]:
-            for d in [True, False]:
-                if p == 0.0 and d == True:
-                    continue
-                np.random.seed(0)
-                if d == True:
-                    out_file_name = "output_more_2/p%f_%s_with_dense_dropout" % (p, nonlinearity[0])
-                else:
-                    out_file_name = "output_more_2/p%f_%s_with_dense" % (p, nonlinearity[0])
-                net_args = {"p":p, "nonlinearity": nonlinearity[1]}
-                if d == True:
-                    net_args["dropout"] = True
+if "CIFAR10_EXP_1" in os.environ:
+    for replicate in [0,1,2]:
+        for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
+            for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+                np.random.seed(replicate)
                 train(
                     get_net(
-                        get_deep_net_light_with_dense_2(net_args, custom_layer=MoreSkippableNonlinearityLayer),
+                        get_deep_net_light_with_dense_for_cifar10(
+                            {"p":p, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
                         (X_train, y_train, X_valid, y_valid), 
                         {"batch_size": 128}
                     ),
                     num_epochs=20,
                     data=(X_train, y_train, X_valid, y_valid),
-                    out_file=out_file_name,
+                    out_file="output_cifar10/p%f_%s_with_dense_dropout.%i" % (p, nonlinearity[0], replicate),
                     debug=False
                 )
 
