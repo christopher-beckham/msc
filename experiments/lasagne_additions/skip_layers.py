@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[17]:
+# In[3]:
 
 import theano
 from theano import tensor as T
@@ -780,26 +780,37 @@ if "MORE_SKIPPABLE_4" in os.environ:
                 )
 
 
-# In[ ]:
+# In[13]:
 
 if "CIFAR10_EXP_1" in os.environ:
     for replicate in [0,1,2]:
-        for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
-            for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
-                np.random.seed(replicate)
-                train(
-                    get_net(
-                        get_deep_net_light_with_dense_for_cifar10(
-                            {"p":p, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
-                        (X_train, y_train, X_valid, y_valid), 
-                        {"batch_size": 128}
-                    ),
-                    num_epochs=20,
-                    data=(X_train, y_train, X_valid, y_valid),
-                    out_file="output_cifar10/p%f_%s_with_dense_dropout.%i" % (p, nonlinearity[0], replicate),
-                    debug=False
-                )
+        for dropout in [True, False]:
+            for p in [0.1, 0.2, 0.3, 0.4, 0.5]:              
+                for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+                    np.random.seed(replicate)
+                    this_args = {"p":p, "nonlinearity": nonlinearity[1]}
+                    if dropout:
+                        this_args["dropout"] = True
+                        out_file = "output_cifar10/p%f_%s_with_dense_dropout.%i" % (p, nonlinearity[0], replicate)
+                    else:
+                        out_file = "output_cifar10/p%f_%s_with_dense.%i" % (p, nonlinearity[0], replicate)
+                    if os.path.isfile("%s.txt" % out_file):
+                        continue
+                    train(
+                        get_net(
+                            get_deep_net_light_with_dense_for_cifar10(
+                                this_args, custom_layer=MoreSkippableNonlinearityLayer),
+                            (X_train, y_train, X_valid, y_valid), 
+                            {"batch_size": 128}
+                        ),
+                        num_epochs=20,
+                        data=(X_train, y_train, X_valid, y_valid),
+                        out_file=out_file,
+                        debug=False
+                    )
 
+
+# 
 
 # In[27]:
 
