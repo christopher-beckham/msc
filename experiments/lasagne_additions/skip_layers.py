@@ -223,27 +223,32 @@ def get_deep_net_light_with_dense(args, custom_layer=SkippableNonlinearityLayer)
     return l_out
 
 
-# In[30]:
+# In[140]:
 
 def get_deep_net_light_with_dense_for_cifar10(args, custom_layer=SkippableNonlinearityLayer):
     if "dropout" in args:
         sys.stderr.write("using dropout instead of skippable nonlinearity...\n")
+    if args["nonlinearity"] == rectify:
+        gain = "relu"
+        sys.stderr.write("get_deep_net_light_with_dense_for_cifar10(): relu gain...\n")
+    else:
+        gain = 1.0
     l_in = InputLayer( (None, 3, 32, 32))
     l_prev = l_in
     for i in range(0, 3):
-        l_prev = Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=linear)
+        l_prev = Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=linear, W=GlorotUniform(gain=gain))
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
         else:
             l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
     for i in range(0, 5):
-        l_prev = Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=linear)
+        l_prev = Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=linear, W=GlorotUniform(gain=gain))
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
         else:
             l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
     for i in range(0, 7):
-        l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=linear)
+        l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=linear, W=GlorotUniform(gain=gain))
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
         else:
@@ -251,7 +256,7 @@ def get_deep_net_light_with_dense_for_cifar10(args, custom_layer=SkippableNonlin
             
     l_prev = DenseLayer(l_prev, num_units=64, nonlinearity=linear)       
     if "dropout" not in args:
-        l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
+        l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"], W=GlorotUniform(gain=gain))
     else:
         l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
     
@@ -478,11 +483,6 @@ def iterate(X_train, y_train, batch_size):
         yield X_batch, y_batch
 
 
-# In[52]:
-
-get_ipython().magic(u'pinfo set_all_param_values')
-
-
 # In[53]:
 
 def train(net_cfg, 
@@ -581,13 +581,13 @@ dummy_net_eval( np.ones((4, 5), dtype="float32") )
 
 # Let's try a "deep" net on MNIST, and see what the outputs look like, as a dummy example.
 
-# In[22]:
+# In[137]:
 
-dummy_net = get_net(
-    l_out=get_deep_net_light_with_dense({"p": 0.25, "dropout": True, "nonlinearity": tanh}, custom_layer=MoreSkippableNonlinearityLayer), 
-    data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
-    args={"batch_size": 10}
-)
+#dummy_net = get_net(
+#    l_out=get_deep_net_light_with_dense({"p": 0.25, "dropout": True, "nonlinearity": tanh}, custom_layer=MoreSkippableNonlinearityLayer), 
+#    data=(X_train_minimal, y_train_minimal, X_train_minimal, y_train_minimal),
+#    args={"batch_size": 10}
+#)
 #train(
 #    net_cfg=dummy_net,
 #    num_epochs=10,
@@ -793,13 +793,14 @@ if "MNIST_EXP_1" in os.environ:
                     )
 
 
-# In[115]:
+# In[139]:
 
 if "CIFAR10_EXP_1" in os.environ:
-    if "RMSPROP" not in os.environ:
-        out_folder = "output_cifar10"
-    else:
-        out_folder = "output_cifar10_rmsprop"
+    #if "RMSPROP" not in os.environ:
+    #    out_folder = "output_cifar10"
+    #else:
+    #    out_folder = "output_cifar10_rmsprop"
+    out_folder = "output_cifar10"
     for replicate in [0,1,2]:
         for dropout in [True, False]:
             for p in [0.1, 0.2, 0.3, 0.4, 0.5]:              
@@ -811,8 +812,8 @@ if "CIFAR10_EXP_1" in os.environ:
                         out_file = "%s/p%f_%s_with_dense_dropout.%i" % (out_folder, p, nonlinearity[0], replicate)
                     else:
                         out_file = "%s/p%f_%s_with_dense.%i" % (out_folder, p, nonlinearity[0], replicate)
-                    if "RMSPROP" in os.environ:
-                        this_args["rmsrop"] = True
+                    #if "RMSPROP" in os.environ:
+                    #    this_args["rmsrop"] = True
                     if os.path.isfile("%s.txt" % out_file):
                         continue
                     train(
@@ -862,9 +863,9 @@ get_ipython().run_cell_magic(u'R', u'-w 800 -h 600', u'files = c(\n    "p0.10000
 
 # getting instabilities in training... use rmsprop and see how that fares?
 
-# In[114]:
+# In[153]:
 
-get_ipython().run_cell_magic(u'R', u'', u'df = read.csv("output_cifar10/p0.100000_relu_with_dense.0.txt")\nplot(df$valid_loss, type="l")\ndf2 = read.csv("output_cifar10/p0.100000_relu_with_dense_dropout.1.txt")\nlines(df2$valid_loss, col="red")')
+get_ipython().run_cell_magic(u'R', u'', u'df = read.csv("output_cifar10/p0.100000_tanh_with_dense.0.txt")\nplot(df$valid_loss, type="l")\n#df2 = read.csv("output_cifar10/p0.100000_relu_with_dense_dropout.1.txt")\n#lines(df2$valid_loss, col="red")')
 
 
 # -----
