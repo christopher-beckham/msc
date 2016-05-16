@@ -767,6 +767,9 @@ if "MORE_SKIPPABLE_4" in os.environ:
         for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
             for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
                 np.random.seed(replicate)
+                out_file="output_more/p%f_%s_with_dense_dropout.%i" % (p, nonlinearity[0], replicate)
+                if os.path.isfile("%s.txt" % out_file):
+                    continue
                 train(
                     get_net(
                         get_deep_net_light_with_dense({"p":p, "dropout": True, "nonlinearity": nonlinearity[1]}, custom_layer=MoreSkippableNonlinearityLayer),
@@ -775,7 +778,7 @@ if "MORE_SKIPPABLE_4" in os.environ:
                     ),
                     num_epochs=20,
                     data=(X_train, y_train, X_valid, y_valid),
-                    out_file="output_more/p%f_%s_with_dense_dropout.%i" % (p, nonlinearity[0], replicate),
+                    out_file=out_file,
                     debug=False
                 )
 
@@ -817,9 +820,9 @@ if "CIFAR10_EXP_1" in os.environ:
 get_ipython().run_cell_magic(u'R', u'', u'files = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\nrainbows = rainbow(length(files))\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh_with_dense.txt",sep=""))\n    if(i == 1) {\n        plot(df$train_loss, type="l", col=rainbows[i], xlab="epoch", ylab="train loss")\n    } else {\n        lines(df$train_loss, col=rainbows[i])\n    }\n}\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh_with_dense.txt",sep=""))\n    if(i == 1) {\n        plot(df$valid_loss, type="l", col=rainbows[i], xlab="epoch", ylab="valid loss")\n    } else {\n        lines(df$valid_loss, col=rainbows[i])\n    }\n}')
 
 
-# In[20]:
+# In[18]:
 
-get_ipython().run_cell_magic(u'R', u'-w 800 -h 600', u'files = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\npar(mfrow=c(2,3))\ndf_baseline = read.csv("output_more/p0.000000_tanh_with_dense.txt")\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh_with_dense.txt",sep=""))\n    df_drop = read.csv(paste("output_more/",files[i],"_tanh_with_dense_dropout.txt",sep=""))\n    #df_baseline = read.csv(paste("output_more/",files[i],"_tanh_with_dense_dropout.txt",sep=""))\n    plot(df$valid_loss, type="l", col="blue", xlab="# epochs", ylab="valid loss", \n         ylim=c(0,0.3), main=files[i])\n    lines(df_drop$valid_loss, col="red")\n    lines(df_baseline$valid_loss, col="black")\n    legend("topright", fill=c("blue", "red", "black"), legend=c("id", "dropout", "none"))\n}')
+get_ipython().run_cell_magic(u'R', u'-w 800 -h 600', u'files = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\npar(mfrow=c(2,3))\ndf_baseline = read.csv("output_more/p0.000000_tanh_with_dense.0.txt")\nfor(i in 1:length(files)) {\n    df = read.csv(paste("output_more/",files[i],"_tanh_with_dense.0.txt",sep=""))\n    df_drop = read.csv(paste("output_more/",files[i],"_tanh_with_dense_dropout.0.txt",sep=""))\n    #df_baseline = read.csv(paste("output_more/",files[i],"_tanh_with_dense_dropout.txt",sep=""))\n    plot(df$valid_loss, type="l", col="blue", xlab="# epochs", ylab="valid loss", \n         ylim=c(0,0.3), main=files[i])\n    lines(df_drop$valid_loss, col="red")\n    lines(df_baseline$valid_loss, col="black")\n    legend("topright", fill=c("blue", "red", "black"), legend=c("id", "dropout", "none"))\n}')
 
 
 # In[21]:
