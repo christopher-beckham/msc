@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[3]:
+# In[114]:
 
 import theano
 from theano import tensor as T
@@ -12,6 +12,7 @@ from lasagne.objectives import *
 from lasagne.regularization import *
 from lasagne.random import get_rng
 from lasagne.updates import *
+from lasagne.init import *
 import numpy as np
 import sys
 sys.path.append("../../modules/")
@@ -82,7 +83,7 @@ print (mask * T.ones((10,8,26,26))).eval()
 """
 
 
-# In[22]:
+# In[110]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, max_=10,
@@ -126,7 +127,7 @@ class SkippableNonlinearityLayer(Layer):
             
 
 
-# In[18]:
+# In[111]:
 
 class MoreSkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5,
@@ -223,9 +224,12 @@ def get_deep_net_light_with_dense(args, custom_layer=SkippableNonlinearityLayer)
     return l_out
 
 
-# In[140]:
+# In[116]:
 
 def get_deep_net_light_with_dense_for_cifar10(args, custom_layer=SkippableNonlinearityLayer):
+    # f1, f2, f3, f4 = 8,16,32,64 for cifar_exp_1
+    # f1, f2, f3, f4 = 32,64,128,256 for cifar_exp_1
+    #
     if "dropout" in args:
         sys.stderr.write("using dropout instead of skippable nonlinearity...\n")
     if args["nonlinearity"] == rectify:
@@ -236,27 +240,27 @@ def get_deep_net_light_with_dense_for_cifar10(args, custom_layer=SkippableNonlin
     l_in = InputLayer( (None, 3, 32, 32))
     l_prev = l_in
     for i in range(0, 3):
-        l_prev = Conv2DLayer(l_prev, num_filters=8, filter_size=3, stride=1, nonlinearity=linear, W=GlorotUniform(gain=gain))
+        l_prev = Conv2DLayer(l_prev, num_filters=args["f1"], filter_size=3, stride=1, nonlinearity=linear, W=GlorotUniform(gain=gain))
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
         else:
             l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
     for i in range(0, 5):
-        l_prev = Conv2DLayer(l_prev, num_filters=16, filter_size=3, stride=1, nonlinearity=linear, W=GlorotUniform(gain=gain))
+        l_prev = Conv2DLayer(l_prev, num_filters=args["f2"], filter_size=3, stride=1, nonlinearity=linear, W=GlorotUniform(gain=gain))
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
         else:
             l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
     for i in range(0, 7):
-        l_prev = Conv2DLayer(l_prev, num_filters=32, filter_size=3, stride=1, nonlinearity=linear, W=GlorotUniform(gain=gain))
+        l_prev = Conv2DLayer(l_prev, num_filters=args["f3"], filter_size=3, stride=1, nonlinearity=linear, W=GlorotUniform(gain=gain))
         if "dropout" not in args:
             l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
         else:
             l_prev = NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"])
             
-    l_prev = DenseLayer(l_prev, num_units=64, nonlinearity=linear)       
+    l_prev = DenseLayer(l_prev, num_units=args["f4"], nonlinearity=linear, W=GlorotUniform(gain=gain))
     if "dropout" not in args:
-        l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"], W=GlorotUniform(gain=gain))
+        l_prev = custom_layer(l_prev, nonlinearity=args["nonlinearity"], p=args["p"])
     else:
         l_prev = DropoutLayer( NonlinearityLayer(l_prev, nonlinearity=args["nonlinearity"]), p=args["p"] )
     
@@ -806,7 +810,7 @@ if "CIFAR10_EXP_1" in os.environ:
             for p in [0.1, 0.2, 0.3, 0.4, 0.5]:              
                 for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
                     np.random.seed(replicate)
-                    this_args = {"p":p, "nonlinearity": nonlinearity[1]}
+                    this_args = {"p":p, "nonlinearity": nonlinearity[1], "f1":8, "f2":16, "f3": 32, "f4":64}
                     if dropout:
                         this_args["dropout"] = True
                         out_file = "%s/p%f_%s_with_dense_dropout.%i" % (out_folder, p, nonlinearity[0], replicate)
@@ -830,7 +834,44 @@ if "CIFAR10_EXP_1" in os.environ:
                     )
 
 
-# 
+# In[119]:
+
+if "CIFAR10_EXP_2" in os.environ:
+    #if "RMSPROP" not in os.environ:
+    #    out_folder = "output_cifar10"
+    #else:
+    #    out_folder = "output_cifar10_rmsprop"
+    out_folder = "output_cifar10_deeper"
+    for replicate in [0,1,2]:
+        for dropout in [True, False]:
+            for p in [0.1, 0.2, 0.3, 0.4, 0.5]:              
+                for nonlinearity in [("tanh", tanh), ("relu", rectify)]:
+                    np.random.seed(replicate)
+                    this_args = {"p":p, "nonlinearity": nonlinearity[1], "f1":16, "f2":32, "f3": 64, "f4":128}
+                    if dropout:
+                        this_args["dropout"] = True
+                        out_file = "%s/p%f_%s_with_dense_dropout.%i" % (out_folder, p, nonlinearity[0], replicate)
+                    else:
+                        out_file = "%s/p%f_%s_with_dense.%i" % (out_folder, p, nonlinearity[0], replicate)
+                    #if "RMSPROP" in os.environ:
+                    #    this_args["rmsrop"] = True
+                    if os.path.isfile("%s.txt" % out_file):
+                        continue
+                    train(
+                        get_net(
+                            get_deep_net_light_with_dense_for_cifar10(
+                                this_args, custom_layer=MoreSkippableNonlinearityLayer),
+                            (X_train, y_train, X_valid, y_valid), 
+                            {"batch_size": 128}
+                        ),
+                        num_epochs=20,
+                        data=(X_train, y_train, X_valid, y_valid),
+                        out_file=out_file,
+                        debug=False
+                    )
+
+
+# ----
 
 # In[27]:
 
@@ -856,16 +897,16 @@ get_ipython().run_cell_magic(u'R', u'-w 800 -h 600', u'files = c(\n    "p0.10000
 get_ipython().run_cell_magic(u'R', u'-w 800 -h 600', u'files = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\navg_df = function(filenames) {\n    df1 = read.csv(filenames[1])\n    df2 = read.csv(filenames[2])\n    df3 = read.csv(filenames[3])\n    return((df1+df2+df3) / 3)\n}\n\n\npar(mfrow=c(2,3))\ndf_baseline = avg_df(\n    c("output_cifar10/p0.000000_tanh_with_dense.0.txt",\n    "output_cifar10/p0.000000_tanh_with_dense.1.txt",\n    "output_cifar10/p0.000000_tanh_with_dense.2.txt")\n)\nfor(i in 1:length(files)) {\n    df = avg_df(\n        c(paste("output_cifar10/",files[i],"_tanh_with_dense.0.txt",sep=""),\n          paste("output_cifar10/",files[i],"_tanh_with_dense.1.txt",sep=""),\n          paste("output_cifar10/",files[i],"_tanh_with_dense.2.txt",sep=""))\n    )\n    df_drop = avg_df(\n        c(paste("output_cifar10/",files[i],"_tanh_with_dense_dropout.0.txt",sep=""),\n          paste("output_cifar10/",files[i],"_tanh_with_dense_dropout.1.txt",sep=""),\n          paste("output_cifar10/",files[i],"_tanh_with_dense_dropout.2.txt",sep=""))\n    )\n    #df_baseline = read.csv(paste("output_more/",files[i],"_tanh_with_dense_dropout.txt",sep=""))\n    plot(df$valid_loss, type="l", col="blue", xlab="# epochs", ylab="valid loss", \n         ylim=c(1,2), main=files[i])\n    lines(df_drop$valid_loss, col="red")\n    lines(df_baseline$valid_loss, col="black")\n    legend("topright", fill=c("blue", "red", "black"), legend=c("id", "dropout", "none"))\n}')
 
 
-# In[96]:
+# In[108]:
 
-get_ipython().run_cell_magic(u'R', u'-w 800 -h 600', u'files = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\navg_df = function(filenames) {\n    df1 = read.csv(filenames[1])\n    df2 = read.csv(filenames[2])\n    df3 = read.csv(filenames[3])\n    return((df1+df2+df3) / 3)\n}\n\n\npar(mfrow=c(2,3))\ndf_baseline = avg_df(\n    c("output_cifar10/p0.000000_relu_with_dense.0.txt",\n    "output_cifar10/p0.000000_relu_with_dense.1.txt",\n    "output_cifar10/p0.000000_relu_with_dense.2.txt")\n)\nfor(i in 1:length(files)) {\n    df = avg_df(\n        c(paste("output_cifar10/",files[i],"_relu_with_dense.0.txt",sep=""),\n          paste("output_cifar10/",files[i],"_relu_with_dense.1.txt",sep=""),\n          paste("output_cifar10/",files[i],"_relu_with_dense.2.txt",sep=""))\n    )\n    df_drop = avg_df(\n        c(paste("output_cifar10/",files[i],"_relu_with_dense_dropout.0.txt",sep=""),\n          paste("output_cifar10/",files[i],"_relu_with_dense_dropout.1.txt",sep=""),\n          paste("output_cifar10/",files[i],"_relu_with_dense_dropout.2.txt",sep=""))\n    )\n    #df_baseline = read.csv(paste("output_more/",files[i],"_tanh_with_dense_dropout.txt",sep=""))\n    plot(df$valid_loss, type="l", col="blue", xlab="# epochs", ylab="valid loss", \n         , main=files[i])\n    lines(df_drop$valid_loss, col="red")\n    lines(df_baseline$valid_loss, col="black")\n    legend("topright", fill=c("blue", "red", "black"), legend=c("id", "dropout", "none"))\n}')
+get_ipython().run_cell_magic(u'R', u'-w 800 -h 600', u'files = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\navg_df = function(filenames) {\n    n = 3\n    df1 = read.csv(filenames[1])\n    if( sum(is.nan(as.matrix(df1))) > 0 ) {\n        df1 = 0\n        n = n-1\n        write(paste("WARNING: NaNs in",filenames[1]), stderr())\n    }\n    df2 = read.csv(filenames[2])\n    if( sum(is.nan(as.matrix(df2))) > 0 ) {\n        df2 = 0\n        n = n-1\n        write(paste("WARNING: NaNs in",filenames[1]), stderr())\n    }\n    \n    df3 = read.csv(filenames[3])\n    if( sum(is.nan(as.matrix(df3))) > 0 ) {\n        df3 = 0\n        n = n-1\n        write(paste("WARNING: NaNs in",filenames[1]), stderr())\n    }\n    \n    return((df1+df2+df3) / n)\n}\n\n\npar(mfrow=c(2,3))\ndf_baseline = avg_df(\n    c("output_cifar10_tmp/p0.000000_relu_with_dense.0.txt",\n    "output_cifar10_tmp/p0.000000_relu_with_dense.1.txt",\n    "output_cifar10_tmp/p0.000000_relu_with_dense.2.txt")\n)\nfor(i in 1:length(files)) {\n    df = avg_df(\n        c(paste("output_cifar10_tmp/",files[i],"_relu_with_dense.0.txt",sep=""),\n          paste("output_cifar10_tmp/",files[i],"_relu_with_dense.1.txt",sep=""),\n          paste("output_cifar10_tmp/",files[i],"_relu_with_dense.2.txt",sep=""))\n    )\n    df_drop = avg_df(\n        c(paste("output_cifar10_tmp/",files[i],"_relu_with_dense_dropout.0.txt",sep=""),\n          paste("output_cifar10_tmp/",files[i],"_relu_with_dense_dropout.1.txt",sep=""),\n          paste("output_cifar10_tmp/",files[i],"_relu_with_dense_dropout.2.txt",sep=""))\n    )\n    #df_baseline = read.csv(paste("output_more/",files[i],"_tanh_with_dense_dropout.txt",sep=""))\n    plot(df$valid_loss, type="l", col="blue", xlab="# epochs", ylab="valid loss", \n         , main=files[i])\n    lines(df_drop$valid_loss, col="red")\n    lines(df_baseline$valid_loss, col="black")\n    legend("topright", fill=c("blue", "red", "black"), legend=c("id", "dropout", "none"))\n}')
 
 
-# getting instabilities in training... use rmsprop and see how that fares?
+# Was getting instabilities (well, non-learning) in training with relu, so changed to gain=relu. Still getting instabilities... but should we just move onto a deeper model anyway?
 
-# In[153]:
+# In[107]:
 
-get_ipython().run_cell_magic(u'R', u'', u'df = read.csv("output_cifar10/p0.100000_tanh_with_dense.0.txt")\nplot(df$valid_loss, type="l")\n#df2 = read.csv("output_cifar10/p0.100000_relu_with_dense_dropout.1.txt")\n#lines(df2$valid_loss, col="red")')
+get_ipython().run_cell_magic(u'R', u'', u'df=read.csv("output_cifar10_tmp/p0.000000_relu_with_dense.2.txt")\nplot(df$valid_loss, type="l")\n#df2 = read.csv("output_cifar10/p0.100000_relu_with_dense_dropout.1.txt")\n#lines(df2$valid_loss, col="red")')
 
 
 # -----
