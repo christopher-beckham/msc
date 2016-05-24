@@ -17,6 +17,7 @@ from lasagne.updates import *
 from lasagne.init import *
 import numpy as np
 import sys
+sys.setrecursionlimit(10000)
 sys.path.append("../../modules/")
 import helper as hp
 
