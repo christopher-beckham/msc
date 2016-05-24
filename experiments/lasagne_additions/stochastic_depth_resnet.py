@@ -108,6 +108,27 @@ class SkippableNonlinearityLayer(Layer):
                 return mask*input + (1-mask)*self.nonlinearity(input) 
 
 
+# In[1]:
+
+class MoreSkippableNonlinearityLayer(Layer):
+    def __init__(self, incoming, nonlinearity=rectify, p=0.5,
+                 **kwargs):
+        super(MoreSkippableNonlinearityLayer, self).__init__(incoming, **kwargs)
+        self.nonlinearity = (identity if nonlinearity is None
+                             else nonlinearity)
+        self._srng = RandomStreams(get_rng().randint(1, 2147462579))
+        self.p = p
+
+    def get_output_for(self, input, deterministic=False, **kwargs):
+        if deterministic or self.p == 0.0:
+            # apply the bernoulli expectation
+            return self.p*input + (1-self.p)*self.nonlinearity(input)
+        else:
+            mask = self._srng.binomial(n=1, p=(self.p), size=input.shape,
+                dtype=input.dtype)
+            return mask*input + (1-mask)*self.nonlinearity(input) 
+
+
 # There is a difference between this residual block method and the one that is defined in [link]. When the number of filters is different to the layer's output shape (or the stride is different), instead of using a convolution to make things compatible, we use an average pooling with a pool size of 1 and a the defined stride, followed by (if necessary) adding extra zero-padded feature maps. This is because this is how the authors in [link] have defined it.
 
 # In[20]:
@@ -129,7 +150,7 @@ def residual_block(layer, n_out_channels, stride=1, survival_p=0.5, nonlinearity
     if nonlinearity_p == 0.0:
         conv = NonlinearityLayer(conv, nonlinearity=rectify)
     else:
-        conv = SkippableNonlinearityLayer(conv, p=nonlinearity_p, nonlinearity=rectify)
+        conv = MoreSkippableNonlinearityLayer(conv, p=nonlinearity_p, nonlinearity=rectify)
     conv = Conv2DLayer(conv, num_filters=n_out_channels,
                        filter_size=(3,3), stride=(1,1), pad=(1,1), nonlinearity=linear)
     conv = BatchNormLayer(conv)
@@ -137,7 +158,7 @@ def residual_block(layer, n_out_channels, stride=1, survival_p=0.5, nonlinearity
     if nonlinearity_p == 0.0:
         return NonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
     else:
-        return SkippableNonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
+        return MoreSkippableNonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
 
 
 # In[18]:
