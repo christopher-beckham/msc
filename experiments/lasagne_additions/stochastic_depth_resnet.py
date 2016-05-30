@@ -367,15 +367,6 @@ def train(net_cfg,
 
 # Reproduce stochastic depth paper using varying values of $p$ (ie no linear decay).
 
-# In[29]:
-
-get_net(
-    yu_cifar10_net({"survival_p": 0.5, "nonlinearity_p": 0.0}),
-    (X_train, y_train, X_valid, y_valid), 
-    {"batch_size": 128}
-)
-
-
 # In[22]:
 
 if "CIFAR10_EXP_1" in os.environ:
