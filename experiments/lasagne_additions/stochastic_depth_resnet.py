@@ -305,7 +305,7 @@ def get_net(l_out, data, args={}):
     }
 
 
-# In[121]:
+# In[125]:
 
 def train(net_cfg, 
           num_epochs,
@@ -319,9 +319,9 @@ def train(net_cfg,
     if resume == False:
         if out_file != None:
             f = open("%s.txt" % out_file, "wb")
-            f.write("epoch,train_loss,valid_loss,valid_accuracy,time\n")
+            f.write("epoch,train_loss,avg_valid_loss,valid_accuracy,time\n")
         if print_out:
-            print "epoch,train_loss,valid_loss,valid_accuracy,time"
+            print "epoch,train_loss,avg_valid_loss,valid_accuracy,time"
     else:
         sys.stderr.write("resuming training...\n")
         if out_file != None:
@@ -331,9 +331,7 @@ def train(net_cfg,
             set_all_param_values(l_out, pickle.load(g))          
     # extract functions
     X_train, y_train, X_valid, y_valid = data
-    train_fn, los = net_cfg["train_fn"]
-    loss_fn = net_cfg["loss_fn"]
-    preds_fn = net_cfg["preds_fn"]
+    train_fn, loss_fn, preds_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"]
     
     # training
     train_idxs, valid_idxs = net_cfg["train_idxs"], net_cfg["valid_idxs"]
@@ -358,7 +356,7 @@ def train(net_cfg,
         this_valid_losses = []
         for i in valid_idxs:
             this_valid_losses.append( loss_fn(i) )
-        valid_loss = np.mean(this_valid_losses)
+        avg_valid_loss = np.mean(this_valid_losses)
         
         # validation accuracy loop
         this_valid_preds = []
@@ -370,10 +368,10 @@ def train(net_cfg,
         if f != None:
             f.write(
                 "%i,%f,%f,%f,%f\n" %
-                    (epoch+1, np.mean(this_train_losses), valid_loss, valid_acc, time_taken) 
+                    (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, time_taken) 
             )
         if print_out:
-            print "%i,%f,%f,%f,%f" %                 (epoch+1, np.mean(this_train_losses), valid_loss, valid_acc, time_taken)
+            print "%i,%f,%f,%f,%f" %                 (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, time_taken)
         #print valid_loss
         #return train_losses
     if f != None:
@@ -386,7 +384,7 @@ def train(net_cfg,
 
 # ----
 
-# In[122]:
+# In[124]:
 
 if "QUICK" in os.environ:
     train(
