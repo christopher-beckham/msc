@@ -24,7 +24,7 @@ import helper as hp
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 import matplotlib.pyplot as plt
-get_ipython().magic(u'matplotlib inline')
+#get_ipython().magic(u'matplotlib inline')
 
 import os
 import cPickle as pickle
@@ -35,7 +35,7 @@ from theano.ifelse import ifelse
 
 from time import time
 
-get_ipython().magic(u'load_ext rpy2.ipython')
+#get_ipython().magic(u'load_ext rpy2.ipython')
 
 from scipy import stats
 
@@ -269,24 +269,21 @@ def get_net(l_out, data, args={}):
     preds = T.argmax(net_out,axis=1)
     preds_fn = theano.function(inputs=[], outputs=preds, givens={X:X_valid})
     # this is also meant to be non-deterministic
-    out_fn = theano.function(inputs=[], outputs=net_out, givens={X:X_valid})
-    outs_with_nonlinearity = theano.function(
-        [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
-              if isinstance(layer, SkippableNonlinearityLayer) or \
-                  isinstance(layer, MoreSkippableNonlinearityLayer) ], on_unused_input="warn"
-    )
-    outs_without_nonlinearity = theano.function(
-        [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
-              if isinstance(layer, Conv2DLayer) or isinstance(layer, DenseLayer) ]
-    )
+    #out_fn = theano.function(inputs=[], outputs=net_out, givens={X:X_valid})
+    #outs_with_nonlinearity = theano.function(
+    #    [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
+    #          if isinstance(layer, SkippableNonlinearityLayer) or \
+    #              isinstance(layer, MoreSkippableNonlinearityLayer) ], on_unused_input="warn"
+    #)
+    #outs_without_nonlinearity = theano.function(
+    #    [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
+    #          if isinstance(layer, Conv2DLayer) or isinstance(layer, DenseLayer) ]
+    #)
     return {
         "train_fn": train_fn,
         "acc_fn": acc_fn,
         "preds_fn": preds_fn,
         "loss_fn": loss_fn,
-        "out_fn": out_fn,
-        "outs_with_nonlinearity": outs_with_nonlinearity,
-        "outs_without_nonlinearity": outs_without_nonlinearity,
         "l_out": l_out,
         "n_batches": X_train.get_value().shape[0] // bs
     }
@@ -322,7 +319,7 @@ def train(net_cfg,
     loss_fn = net_cfg["loss_fn"]
     acc_fn = net_cfg["acc_fn"]
     preds_fn = net_cfg["preds_fn"]
-    outs_with_nonlinearity = net_cfg["outs_with_nonlinearity"]
+    #outs_with_nonlinearity = net_cfg["outs_with_nonlinearity"]
     # training
     n_batches = net_cfg["n_batches"]
     idxs = [x for x in range(0, n_batches)]
