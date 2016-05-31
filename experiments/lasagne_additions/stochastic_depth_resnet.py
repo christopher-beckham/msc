@@ -3,7 +3,7 @@
 
 # todo: move to lasagne recipes fork, and import the cifar10 data loader, and run exps on cuda4
 
-# In[2]:
+# In[9]:
 
 import theano
 from theano import tensor as T
@@ -46,7 +46,7 @@ import math
 
 # We keep all the contents of the tensor with survival probability $p$, so the expectation at test time is also $p$.
 
-# In[57]:
+# In[10]:
 
 class BinomialDropLayer(Layer):
     def __init__(self, incoming, p=0.5, **kwargs):
@@ -66,7 +66,7 @@ class BinomialDropLayer(Layer):
             return mask*input
 
 
-# In[58]:
+# In[11]:
 
 class IfElseDropLayer(Layer):
     def __init__(self, incoming, p=0.5, **kwargs):
@@ -85,7 +85,7 @@ class IfElseDropLayer(Layer):
             )
 
 
-# In[59]:
+# In[12]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, **kwargs):
@@ -111,7 +111,7 @@ class SkippableNonlinearityLayer(Layer):
                 return mask*input + (1-mask)*self.nonlinearity(input) 
 
 
-# In[60]:
+# In[13]:
 
 class MoreSkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5,
@@ -134,7 +134,7 @@ class MoreSkippableNonlinearityLayer(Layer):
 
 # There is a difference between this residual block method and the one that is defined in [link]. When the number of filters is different to the layer's output shape (or the stride is different), instead of using a convolution to make things compatible, we use an average pooling with a pool size of 1 and a the defined stride, followed by (if necessary) adding extra zero-padded feature maps. This is because this is how the authors in [link] have defined it.
 
-# In[1]:
+# In[14]:
 
 def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearity_p=None):
     conv = layer
@@ -165,7 +165,7 @@ def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearit
         return MoreSkippableNonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
 
 
-# In[62]:
+# In[15]:
 
 def yu_cifar10_net(args):
     # Architecture from:
@@ -192,9 +192,23 @@ def yu_cifar10_net(args):
     return layer
 
 
+# In[25]:
+
+def debug_net(args):
+    layer = InputLayer( (None, 3, 32, 32) )
+    layer = Conv2DLayer(layer, num_filters=8, filter_size=3)
+    layer = MaxPool2DLayer(layer, pool_size=2)
+    layer = Conv2DLayer(layer, num_filters=8, filter_size=3)
+    layer = MaxPool2DLayer(layer, pool_size=2)
+    layer = Conv2DLayer(layer, num_filters=8, filter_size=3)
+    layer = MaxPool2DLayer(layer, pool_size=2)
+    layer = DenseLayer(layer, nonlinearity=softmax, num_units=10)
+    return layer
+
+
 # ----
 
-# In[65]:
+# In[87]:
 
 data = deep_residual_learning_CIFAR10.load_data()
 if "QUICK" in os.environ:
@@ -204,7 +218,7 @@ else:
     X_train_and_valid, y_train_and_valid, X_test, y_test =         data["X_train"][0:50000], data["Y_train"][0:50000], data["X_test"], data["Y_test"]
 
 
-# In[66]:
+# In[88]:
 
 X_train = X_train_and_valid[ 0 : 0.9*X_train_and_valid.shape[0] ]
 y_train = y_train_and_valid[ 0 : 0.9*y_train_and_valid.shape[0] ]
@@ -212,7 +226,7 @@ X_valid = X_train_and_valid[ 0.9*X_train_and_valid.shape[0] :: ]
 y_valid = y_train_and_valid[ 0.9*y_train_and_valid.shape[0] :: ]
 
 
-# In[67]:
+# In[89]:
 
 X_train = theano.shared(np.asarray(X_train, dtype=theano.config.floatX), borrow=True)
 y_train = theano.shared(np.asarray(y_train, dtype=theano.config.floatX), borrow=True)
@@ -224,7 +238,22 @@ y_test = theano.shared(np.asarray(y_test, dtype=theano.config.floatX), borrow=Tr
 
 # -----
 
-# In[68]:
+# In[110]:
+
+def get_batch_idxs(x, bs):
+    b = 0
+    arr = []
+    while True:
+        #print b, x[b*bs : (b+1)*bs].shape
+        if x[b*bs : (b+1)*bs].shape[0] != 0:
+            arr.append(b)
+        else:
+            break
+        b += 1
+    return arr
+
+
+# In[111]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -259,40 +288,24 @@ def get_net(l_out, data, args={}):
     train_fn = theano.function(inputs=[idx], outputs=loss, updates=updates, 
         givens={X: X_train[idx*bs : (idx+1)*bs], y: y_train[idx*bs : (idx+1)*bs]}
     )
+    loss_fn = theano.function(inputs=[idx], outputs=loss_det,
+        givens={X: X_valid[idx*bs : (idx+1)*bs], y: y_valid[idx*bs : (idx+1)*bs]}
+    )
+    preds_fn = theano.function(inputs=[idx], outputs=T.argmax(net_out_det,axis=1),
+        givens={X: X_valid[idx*bs : (idx+1)*bs]}
+    )
     
-    # this is for the validation set
-    # make the output deterministic
-    loss_fn = theano.function(inputs=[], outputs=loss_det, givens={X: X_valid,y: y_valid})
-    acc = T.mean( T.eq( T.argmax(net_out_det,axis=1), y_valid) )
-    acc_fn = theano.function(inputs=[], outputs=acc, givens={X:X_valid})
-    # this is meant to be non-deterministic
-    preds = T.argmax(net_out,axis=1)
-    preds_fn = theano.function(inputs=[], outputs=preds, givens={X:X_valid})
-    # this is also meant to be non-deterministic
-    out_fn = theano.function(inputs=[], outputs=net_out, givens={X:X_valid})
-    outs_with_nonlinearity = theano.function(
-        [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
-              if isinstance(layer, SkippableNonlinearityLayer) or \
-                  isinstance(layer, MoreSkippableNonlinearityLayer) ], on_unused_input="warn"
-    )
-    outs_without_nonlinearity = theano.function(
-        [X], [ get_output(layer, X, deterministic=True) for layer in get_all_layers(l_out) 
-              if isinstance(layer, Conv2DLayer) or isinstance(layer, DenseLayer) ]
-    )
     return {
         "train_fn": train_fn,
-        "acc_fn": acc_fn,
-        "preds_fn": preds_fn,
         "loss_fn": loss_fn,
-        "out_fn": out_fn,
-        "outs_with_nonlinearity": outs_with_nonlinearity,
-        "outs_without_nonlinearity": outs_without_nonlinearity,
+        "preds_fn": preds_fn,
         "l_out": l_out,
-        "n_batches": X_train.get_value().shape[0] // bs
+        "train_idxs": get_batch_idxs(X_train.get_value(), bs),
+        "valid_idxs": get_batch_idxs(X_valid.get_value(), bs)
     }
 
 
-# In[69]:
+# In[121]:
 
 def train(net_cfg, 
           num_epochs,
@@ -306,9 +319,9 @@ def train(net_cfg,
     if resume == False:
         if out_file != None:
             f = open("%s.txt" % out_file, "wb")
-            f.write("epoch,train_loss,valid_loss,valid_accuracy,valid_accuracy_ensemble,time\n")
+            f.write("epoch,train_loss,valid_loss,valid_accuracy,time\n")
         if print_out:
-            print "epoch,train_loss,valid_loss,valid_accuracy,valid_accuracy_ensemble,time"
+            print "epoch,train_loss,valid_loss,valid_accuracy,time"
     else:
         sys.stderr.write("resuming training...\n")
         if out_file != None:
@@ -318,44 +331,49 @@ def train(net_cfg,
             set_all_param_values(l_out, pickle.load(g))          
     # extract functions
     X_train, y_train, X_valid, y_valid = data
-    train_fn = net_cfg["train_fn"]
+    train_fn, los = net_cfg["train_fn"]
     loss_fn = net_cfg["loss_fn"]
-    acc_fn = net_cfg["acc_fn"]
     preds_fn = net_cfg["preds_fn"]
-    outs_with_nonlinearity = net_cfg["outs_with_nonlinearity"]
+    
     # training
-    n_batches = net_cfg["n_batches"]
-    idxs = [x for x in range(0, n_batches)]
+    train_idxs, valid_idxs = net_cfg["train_idxs"], net_cfg["valid_idxs"]
+    
     if debug:
-        sys.stderr.write("n_batches: %s\n" % n_batches)
-        sys.stderr.write("idxs: %s\n" % idxs)
+        sys.stderr.write("idxs: %s\n" % train_idxs)
     for epoch in range(0, num_epochs):
         this_train_losses = []
-        np.random.shuffle(idxs)
-        #if debug:
-        #    sys.stderr.write("%s\n" % idxs)
+        np.random.shuffle(train_idxs)
+        if debug:
+            sys.stderr.write("%s\n" % train_idxs)
+        
+        # training loop
         t0 = time()
-        for i in range(0, len(idxs)):
-            loss_for_this_batch = train_fn( idxs[i] )
+        this_train_losses = []
+        for i in train_idxs:
+            loss_for_this_batch = train_fn(i)
             this_train_losses.append( loss_for_this_batch )
         time_taken = time() - t0
-        valid_loss = loss_fn()
-        valid_acc = acc_fn()
-        ## EXPERIMENTAL ##
-        mat = []
-        numiters=10
-        for i in range(0, numiters):
-            mat.append( preds_fn() )
-        mat = stats.mode(np.vstack(mat))[0]
-        valid_acc_ensemble = np.mean(mat==y_valid.get_value())
+        
+        # validation loss loop
+        this_valid_losses = []
+        for i in valid_idxs:
+            this_valid_losses.append( loss_fn(i) )
+        valid_loss = np.mean(this_valid_losses)
+        
+        # validation accuracy loop
+        this_valid_preds = []
+        for i in valid_idxs:
+            this_valid_preds += preds_fn(i).tolist()
+        valid_acc = np.mean( this_valid_preds == y_valid.get_value() )
+        
         ## ------------ ##
         if f != None:
             f.write(
-                "%i,%f,%f,%f,%f,%f\n" %
-                    (epoch+1, np.mean(this_train_losses), valid_loss, valid_acc, valid_acc_ensemble, time_taken) 
+                "%i,%f,%f,%f,%f\n" %
+                    (epoch+1, np.mean(this_train_losses), valid_loss, valid_acc, time_taken) 
             )
         if print_out:
-            print "%i,%f,%f,%f,%f,%f" %                 (epoch+1, np.mean(this_train_losses), valid_loss, valid_acc, valid_acc_ensemble, time_taken)
+            print "%i,%f,%f,%f,%f" %                 (epoch+1, np.mean(this_train_losses), valid_loss, valid_acc, time_taken)
         #print valid_loss
         #return train_losses
     if f != None:
@@ -367,6 +385,24 @@ def train(net_cfg,
 
 
 # ----
+
+# In[122]:
+
+if "QUICK" in os.environ:
+    train(
+        get_net(
+            debug_net({}),
+            (X_train, y_train, X_valid, y_valid), 
+            {"batch_size": 32}
+        ),
+        num_epochs=20,
+        data=(X_train, y_train, X_valid, y_valid),
+        out_file=None,
+        debug=True
+    )
+
+
+# -----
 
 # Reproduce stochastic depth paper using varying values of $p$ (ie no linear decay).
 
