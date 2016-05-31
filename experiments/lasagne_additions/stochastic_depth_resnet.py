@@ -44,7 +44,9 @@ import deep_residual_learning_CIFAR10
 import math
 
 
-# In[3]:
+# We keep all the contents of the tensor with survival probability $p$, so the expectation at test time is also $p$.
+
+# In[57]:
 
 class BinomialDropLayer(Layer):
     def __init__(self, incoming, p=0.5, **kwargs):
@@ -64,7 +66,7 @@ class BinomialDropLayer(Layer):
             return mask*input
 
 
-# In[4]:
+# In[58]:
 
 class IfElseDropLayer(Layer):
     def __init__(self, incoming, p=0.5, **kwargs):
@@ -83,7 +85,7 @@ class IfElseDropLayer(Layer):
             )
 
 
-# In[9]:
+# In[59]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, **kwargs):
@@ -109,7 +111,7 @@ class SkippableNonlinearityLayer(Layer):
                 return mask*input + (1-mask)*self.nonlinearity(input) 
 
 
-# In[1]:
+# In[60]:
 
 class MoreSkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5,
@@ -132,9 +134,9 @@ class MoreSkippableNonlinearityLayer(Layer):
 
 # There is a difference between this residual block method and the one that is defined in [link]. When the number of filters is different to the layer's output shape (or the stride is different), instead of using a convolution to make things compatible, we use an average pooling with a pool size of 1 and a the defined stride, followed by (if necessary) adding extra zero-padded feature maps. This is because this is how the authors in [link] have defined it.
 
-# In[20]:
+# In[1]:
 
-def residual_block(layer, n_out_channels, stride=1, survival_p=0.5, nonlinearity_p=0.0):
+def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearity_p=None):
     conv = layer
     if stride > 1:
         layer = Pool2DLayer(layer, pool_size=1, stride=stride, mode="average_inc_pad")
@@ -148,21 +150,22 @@ def residual_block(layer, n_out_channels, stride=1, survival_p=0.5, nonlinearity
     conv = Conv2DLayer(conv, num_filters=n_out_channels,
                        filter_size=(3,3), stride=(stride,stride), pad=(1,1), nonlinearity=linear)
     conv = BatchNormLayer(conv)
-    if nonlinearity_p == 0.0:
+    if nonlinearity_p == None:
         conv = NonlinearityLayer(conv, nonlinearity=rectify)
     else:
         conv = MoreSkippableNonlinearityLayer(conv, p=nonlinearity_p, nonlinearity=rectify)
     conv = Conv2DLayer(conv, num_filters=n_out_channels,
                        filter_size=(3,3), stride=(1,1), pad=(1,1), nonlinearity=linear)
     conv = BatchNormLayer(conv)
-    conv = BinomialDropLayer(conv, p=survival_p)
-    if nonlinearity_p == 0.0:
+    if survival_p != None:
+        conv = BinomialDropLayer(conv, p=survival_p)
+    if nonlinearity_p == None:
         return NonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
     else:
         return MoreSkippableNonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
 
 
-# In[18]:
+# In[62]:
 
 def yu_cifar10_net(args):
     # Architecture from:
@@ -191,7 +194,7 @@ def yu_cifar10_net(args):
 
 # ----
 
-# In[11]:
+# In[65]:
 
 data = deep_residual_learning_CIFAR10.load_data()
 if "QUICK" in os.environ:
@@ -201,7 +204,7 @@ else:
     X_train_and_valid, y_train_and_valid, X_test, y_test =         data["X_train"][0:50000], data["Y_train"][0:50000], data["X_test"], data["Y_test"]
 
 
-# In[12]:
+# In[66]:
 
 X_train = X_train_and_valid[ 0 : 0.9*X_train_and_valid.shape[0] ]
 y_train = y_train_and_valid[ 0 : 0.9*y_train_and_valid.shape[0] ]
@@ -209,7 +212,7 @@ X_valid = X_train_and_valid[ 0.9*X_train_and_valid.shape[0] :: ]
 y_valid = y_train_and_valid[ 0.9*y_train_and_valid.shape[0] :: ]
 
 
-# In[23]:
+# In[67]:
 
 X_train = theano.shared(np.asarray(X_train, dtype=theano.config.floatX), borrow=True)
 y_train = theano.shared(np.asarray(y_train, dtype=theano.config.floatX), borrow=True)
@@ -221,7 +224,7 @@ y_test = theano.shared(np.asarray(y_test, dtype=theano.config.floatX), borrow=Tr
 
 # -----
 
-# In[30]:
+# In[68]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -289,7 +292,7 @@ def get_net(l_out, data, args={}):
     }
 
 
-# In[15]:
+# In[69]:
 
 def train(net_cfg, 
           num_epochs,
@@ -367,20 +370,22 @@ def train(net_cfg,
 
 # Reproduce stochastic depth paper using varying values of $p$ (ie no linear decay).
 
-# In[22]:
+# In[2]:
 
 if "CIFAR10_EXP_1" in os.environ:
-    out_folder = "output_stochastic_depth_resnet"
+    out_folder = "output_stochastic_depth_resnet_new"
     for replicate in [0,1,2]:
-        for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
-            np.random.seed(replicate)
+        for p in [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]:
+            #old experiments used this
+            #np.random.seed(replicate)
+            lasagne.random.set_rng(np.random.RandomState(replicate))
             this_args = {}
             out_file = "%s/p%f_stochastic_depth.%i" % (out_folder, p, replicate)
             if os.path.isfile("%s.txt" % out_file):
                 continue
             train(
                 get_net(
-                    yu_cifar10_net({"survival_p": p, "nonlinearity_p": 0.0}),
+                    yu_cifar10_net({"survival_p": p, "nonlinearity_p": None}),
                     (X_train, y_train, X_valid, y_valid), 
                     {"batch_size": 128}
                 ),
@@ -396,9 +401,9 @@ if "CIFAR10_EXP_1" in os.environ:
 # In[ ]:
 
 if "CIFAR10_EXP_2" in os.environ:
-    out_folder = "output_stochastic_depth_resnet"
+    out_folder = "output_stochastic_depth_resnet_new"
     for replicate in [0,1,2]:
-        for p in [0.1, 0.2, 0.3, 0.4, 0.5]:
+        for p in [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]:
             np.random.seed(replicate)
             this_args = {}
             out_file = "%s/p%f_stochastic_nonlinearity.%i" % (out_folder, p, replicate)
@@ -406,7 +411,7 @@ if "CIFAR10_EXP_2" in os.environ:
                 continue
             train(
                 get_net(
-                    yu_cifar10_net({"survival_p": 1.0, "nonlinearity_p": p}),
+                    yu_cifar10_net({"survival_p": None, "nonlinearity_p": p}),
                     (X_train, y_train, X_valid, y_valid), 
                     {"batch_size": 128}
                 ),
@@ -415,4 +420,97 @@ if "CIFAR10_EXP_2" in os.environ:
                 out_file=out_file,
                 debug=False
             )
+
+
+# -----
+
+# ## Plot the curves for stochastic depth
+
+# In[38]:
+
+get_ipython().run_cell_magic(u'R', u'-w 480 -h 480', u'ps = c(\n    "p0.000000",\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\n\n#par(mfrow=c(2,2))\n\nrainbows = rainbow(length(ps))\n# train loss\nmax_y = 0\nmin_y = 10000\nfor(i in 1:length(ps)) {\n    for(seed in 0:2) {\n        df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",seed,".txt",sep=""))\n        if(min(df$train_loss) < min_y) {\n            min_y = min(df$train_loss)\n        }\n        if(max(df$train_loss) > max_y) {\n            max_y = max(df$train_loss)\n        }\n    }\n}\n\nfor(i in 1:length(ps)) {\n    df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",0,".txt",sep=""))\n    df2 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",1,".txt",sep=""))\n    df3 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",2,".txt",sep=""))\n\n    if(i==1) {\n        plot(df$train_loss, type="l", ylim=c(min_y, max_y), \n             col=rainbows[i], xlab="epoch", ylab="train loss", \n             main="stochastic depth")\n        lines(df2$train_loss, col=rainbows[i])\n        lines(df3$train_loss, col=rainbows[i])\n    } else {\n        lines(df$train_loss, col=rainbows[i])\n        lines(df2$train_loss, col=rainbows[i])\n        lines(df3$train_loss, col=rainbows[i])\n    }\n}')
+
+
+# Plot the validation curves (non-averaging)
+
+# In[46]:
+
+get_ipython().run_cell_magic(u'R', u'-w 480 -h 480', u'ps = c(\n    "p0.000000",\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\n\n#par(mfrow=c(2,2))\n\nrainbows = rainbow(length(ps))\n# train loss\nmax_y = -10000\nmin_y = 10000\nfor(i in 1:length(ps)) {\n    for(seed in 0:2) {\n        df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",seed,".txt",sep=""))\n        if(min(df$valid_accuracy) < min_y) {\n            min_y = min(df$valid_accuracy)\n        }\n        if(max(df$valid_accuracy) > max_y) {\n            max_y = max(df$valid_accuracy)\n        }\n    }\n}\n\nfor(i in 1:length(ps)) {\n    df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",0,".txt",sep=""))\n    df2 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",1,".txt",sep=""))\n    df3 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",2,".txt",sep=""))\n    if(i==1) {\n        plot(df$valid_accuracy, type="l", ylim=c(min_y, max_y), \n             col=rainbows[i], xlab="epoch", ylab="valid accuracy", \n             main="stochastic depth")\n        lines(df2$valid_accuracy, col=rainbows[i])\n        lines(df3$valid_accuracy, col=rainbows[i])\n    } else {\n        lines(df$valid_accuracy, col=rainbows[i])\n        lines(df2$valid_accuracy, col=rainbows[i])\n        lines(df3$valid_accuracy, col=rainbows[i])\n    }\n}\nlegend("topleft", fill=rainbows, legend=ps)\n\n')
+
+
+# In[47]:
+
+get_ipython().run_cell_magic(u'R', u'-w 480 -h 480', u'ps = c(\n    "p0.000000",\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\n\n#par(mfrow=c(2,2))\n\nrainbows = rainbow(length(ps))\n# train loss\nmax_y = -10000\nmin_y = 10000\nfor(i in 1:length(ps)) {\n    for(seed in 0:2) {\n        df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",seed,".txt",sep=""))\n        if(min(df$valid_accuracy) < min_y) {\n            min_y = min(df$valid_accuracy)\n        }\n        if(max(df$valid_accuracy) > max_y) {\n            max_y = max(df$valid_accuracy)\n        }\n    }\n}\n\nfor(i in 1:length(ps)) {\n    df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",0,".txt",sep=""))\n    df2 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",1,".txt",sep=""))\n    df3 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",2,".txt",sep=""))\n    dff = (df+df2+df3) / 3\n    if(i==1) {\n        plot(dff$valid_accuracy, type="l", ylim=c(min_y, max_y), \n             col=rainbows[i], xlab="epoch", ylab="valid accuracy", \n             main="stochastic depth")\n    } else {\n        lines(dff$valid_accuracy, col=rainbows[i])\n    }\n}\nlegend("topleft", fill=rainbows, legend=ps)\n\n')
+
+
+# ## Plot the curves for stochastic nonlinearity
+
+# In[52]:
+
+get_ipython().run_cell_magic(u'R', u'-w 480 -h 480', u'ps = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\n\n#par(mfrow=c(2,2))\n\nrainbows = rainbow(length(ps))\n# train loss\nmax_y = -10000\nmin_y = 10000\nfor(i in 1:length(ps)) {\n    for(seed in 0:2) {\n        #print(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",0,".txt",sep=""))\n        df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",seed,".txt",sep=""))\n        if(min(df$train_loss) < min_y) {\n            min_y = min(df$train_loss)\n        }\n        if(max(df$train_loss) > max_y) {\n            max_y = max(df$train_loss)\n        }\n    }\n}\n\nfor(i in 1:length(ps)) {\n    df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",0,".txt",sep=""))\n    df2 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",1,".txt",sep=""))\n    df3 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",2,".txt",sep=""))\n\n    if(i==1) {\n        plot(df$train_loss, type="l", ylim=c(min_y, max_y), \n             col=rainbows[i], xlab="epoch", ylab="train loss", \n             main="stochastic depth")\n        lines(df2$train_loss, col=rainbows[i])\n        lines(df3$train_loss, col=rainbows[i])\n    } else {\n        lines(df$train_loss, col=rainbows[i])\n        lines(df2$train_loss, col=rainbows[i])\n        lines(df3$train_loss, col=rainbows[i])\n    }\n}')
+
+
+# In[4]:
+
+get_ipython().run_cell_magic(u'R', u'-w 480 -h 480', u'ps = c(\n    "p0.000000",\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\n\n#par(mfrow=c(2,2))\n\nrainbows = rainbow(length(ps))\n# train loss\nmax_y = -10000\nmin_y = 10000\nfor(i in 1:length(ps)) {\n    for(seed in 0:2) {\n        df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",seed,".txt",sep=""))\n        if(min(df$valid_accuracy) < min_y) {\n            min_y = min(df$valid_accuracy)\n        }\n        if(max(df$valid_accuracy) > max_y) {\n            max_y = max(df$valid_accuracy)\n        }\n    }\n}\n\nfor(i in 1:length(ps)) {\n    df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",0,".txt",sep=""))\n    df2 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",1,".txt",sep=""))\n    df3 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",2,".txt",sep=""))\n    if(i==1) {\n        plot(df$valid_accuracy, type="l", ylim=c(min_y, max_y), \n             col=rainbows[i], xlab="epoch", ylab="valid accuracy", \n             main="stochastic depth")\n        lines(df2$valid_accuracy, col=rainbows[i])\n        lines(df3$valid_accuracy, col=rainbows[i])\n    } else {\n        lines(df$valid_accuracy, col=rainbows[i])\n        lines(df2$valid_accuracy, col=rainbows[i])\n        lines(df3$valid_accuracy, col=rainbows[i])\n    }\n}\nlegend("topleft", fill=rainbows, legend=ps)\n\n')
+
+
+# In[6]:
+
+get_ipython().run_cell_magic(u'R', u'-w 480 -h 480', u'ps = c(\n    "p0.000000",\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\n\n#par(mfrow=c(2,2))\n\nrainbows = rainbow(length(ps))\n# train loss\nmax_y = -10000\nmin_y = 10000\nfor(i in 1:length(ps)) {\n    for(seed in 0:2) {\n        df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",seed,".txt",sep=""))\n        if(min(df$valid_accuracy) < min_y) {\n            min_y = min(df$valid_accuracy)\n        }\n        if(max(df$valid_accuracy) > max_y) {\n            max_y = max(df$valid_accuracy)\n        }\n    }\n}\n\nfor(i in 1:length(ps)) {\n    df = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",0,".txt",sep=""))\n    df2 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",1,".txt",sep=""))\n    df3 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",2,".txt",sep=""))\n    dff = (df+df2+df3) / 3\n    if(i==1) {\n        plot(dff$valid_accuracy, type="l", ylim=c(min_y, max_y), \n             col=rainbows[i], xlab="epoch", ylab="valid accuracy", \n             main="stochastic nonlinearity")\n    } else {\n        lines(dff$valid_accuracy, col=rainbows[i])\n    }\n}\nlegend("topleft", fill=rainbows, legend=ps)\n\n')
+
+
+# ----
+
+# In[97]:
+
+get_ipython().run_cell_magic(u'R', u'', u'ps = c(\n    "p0.100000",\n    "p0.200000",\n    "p0.300000",\n    "p0.400000",\n    "p0.500000"\n)\nfor(i in 1:length(ps)) {\n    df_nonlinearity = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",0,".txt",sep=""))\n    df_nonlinearity2 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",1,".txt",sep=""))\n    df_nonlinearity3 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_nonlinearity.",2,".txt",sep=""))\n\n    df_stochastic = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",0,".txt",sep=""))\n    df_stochastic2 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",1,".txt",sep=""))\n    df_stochastic3 = read.csv(paste("output_stochastic_depth_resnet/",ps[i],"_stochastic_depth.",2,".txt",sep=""))\n    \n    # valid loss between both\n    plot(df_nonlinearity$valid_accuracy, ylim=c(0,1), type="l", col="blue",\n        ylab="valid accuracy", xlab="epoch", main=paste("stochastic depth vs nonlinearity", ps[i]))\n    lines(df_nonlinearity2$valid_accuracy, col="blue")\n    lines(df_nonlinearity3$valid_accuracy, col="blue")\n    \n    lines(df_stochastic$valid_accuracy, col="red")\n    lines(df_stochastic2$valid_accuracy, col="red")\n    lines(df_stochastic3$valid_accuracy, col="red")\n    \n}')
+
+
+# ----
+
+# In[75]:
+
+import draw_net
+reload(draw_net)
+
+
+# In[71]:
+
+tmp_net = yu_cifar10_net({"survival_p": 0.5, "nonlinearity_p": 0.0})
+
+
+# In[79]:
+
+draw_net.draw_to_file(get_all_layers(tmp_net), "network_diagram_stochastic_depth.png")
+
+
+# In[82]:
+
+tmp_net = yu_cifar10_net({"survival_p": 1.0, "nonlinearity_p": 0.5})
+
+
+# In[83]:
+
+draw_net.draw_to_file(get_all_layers(tmp_net), "network_diagram_stochastic_nonlinearity.png")
+
+
+# ---
+
+# In[22]:
+
+lasagne.random.set_rng(np.random.RandomState(1))
+l_in = InputLayer( (None, 10) )
+l_dense = DenseLayer(l_in, num_units=5)
+tmp = theano.function([l_in.input_var], get_output(l_dense, l_in.input_var))
+
+
+# In[23]:
+
+tmp( np.ones((1,10)) )
+
+
+# In[ ]:
+
+
 
