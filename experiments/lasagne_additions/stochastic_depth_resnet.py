@@ -3,7 +3,7 @@
 
 # todo: move to lasagne recipes fork, and import the cifar10 data loader, and run exps on cuda4
 
-# In[51]:
+# In[3]:
 
 import theano
 from theano import tensor as T
@@ -46,7 +46,7 @@ import math
 
 # We keep all the contents of the tensor with survival probability $p$, so the expectation at test time is also $p$.
 
-# In[52]:
+# In[4]:
 
 class BinomialDropLayer(Layer):
     def __init__(self, incoming, p=0.5, **kwargs):
@@ -66,7 +66,7 @@ class BinomialDropLayer(Layer):
             return mask*input
 
 
-# In[53]:
+# In[5]:
 
 class IfElseDropLayer(Layer):
     def __init__(self, incoming, p=0.5, **kwargs):
@@ -85,7 +85,7 @@ class IfElseDropLayer(Layer):
             )
 
 
-# In[54]:
+# In[6]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, **kwargs):
@@ -111,7 +111,7 @@ class SkippableNonlinearityLayer(Layer):
                 return mask*input + (1-mask)*self.nonlinearity(input) 
 
 
-# In[55]:
+# In[7]:
 
 class MoreSkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5,
@@ -134,7 +134,7 @@ class MoreSkippableNonlinearityLayer(Layer):
 
 # There is a difference between this residual block method and the one that is defined in [link]. When the number of filters is different to the layer's output shape (or the stride is different), instead of using a convolution to make things compatible, we use an average pooling with a pool size of 1 and a the defined stride, followed by (if necessary) adding extra zero-padded feature maps. This is because this is how the authors in [link] have defined it.
 
-# In[56]:
+# In[8]:
 
 def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearity_p=None):
     conv = layer
@@ -165,7 +165,7 @@ def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearit
         return MoreSkippableNonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
 
 
-# In[57]:
+# In[9]:
 
 def yu_cifar10_net(args):
     # Architecture from:
@@ -192,7 +192,7 @@ def yu_cifar10_net(args):
     return layer
 
 
-# In[58]:
+# In[10]:
 
 def linear_decay(l, L, pL=0.5):
     assert l <= L
@@ -201,34 +201,59 @@ def linear_decay(l, L, pL=0.5):
     return 1.0 - ((l/L)*(1-pL))
 
 
-# In[70]:
+# In[21]:
 
 def yu_cifar10_net_decay(args):
     # Architecture from:
     # https://github.com/yueatsprograms/Stochastic_Depth/blob/master/main.lua
+    
     N = 18
-    nonlinearity_p = rectify
     layer = InputLayer( (None, 3, 32, 32) )
     layer = Conv2DLayer(layer, num_filters=16, filter_size=3, stride=1, pad='same')
     #layer = Pool2DLayer(layer, 2)
     l = 1
     L = 3*N + 2
     for _ in range(N):
-        layer = residual_block(layer, 16, survival_p=linear_decay(l,L), nonlinearity_p=nonlinearity_p)
+        if args["decay"] == "depth":
+            layer = residual_block(layer, 16, survival_p=linear_decay(l,L), nonlinearity_p=None)
+        elif args["decay"] == "nonlinearity":
+            layer = residual_block(layer, 16, survival_p=None, nonlinearity_p=linear_decay(l,L))
+        elif args["decay"] == "both":
+            layer = residual_block(layer, 16, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L))
         #print linear_decay(l,L)
         l += 1
-    layer = residual_block(layer, 32, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=nonlinearity_p)
+    if args["decay"] == "depth":
+        layer = residual_block(layer, 32, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=None)
+    elif args["decay"] == "nonlinearity":
+        layer = residual_block(layer, 32, stride=2, survival_p=None, nonlinearity_p=linear_decay(l,L))
+    elif args["decay"] == "both":
+        layer = residual_block(layer, 32, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L))
     #print linear_decay(l,L)
     l += 1
     for _ in range(N):
-        layer = residual_block(layer, 32, survival_p=linear_decay(l,L), nonlinearity_p=nonlinearity_p)
+        if args["decay"] == "depth":
+            layer = residual_block(layer, 32, survival_p=linear_decay(l,L), nonlinearity_p=None)
+        elif args["decay"] == "nonlinearity":
+            layer = residual_block(layer, 32, survival_p=None, nonlinearity_p=linear_decay(l,L))
+        elif args["decay"] == "both":
+            layer = residual_block(layer, 32, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L))
         #print linear_decay(l,L)
         l += 1
-    layer = residual_block(layer, 64, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=nonlinearity_p)
+    if args["decay"] == "depth":
+        layer = residual_block(layer, 64, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=None)
+    elif args["decay"] == "nonlinearity":
+        layer = residual_block(layer, 64, stride=2, survival_p=None, nonlinearity_p=linear_decay(l,L))
+    elif args["decay"] == "both":
+        layer = residual_block(layer, 64, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L))
     #print linear_decay(l,L)
     l += 1
     for _ in range(N):
-        layer = residual_block(layer, 64, survival_p=linear_decay(l,L), nonlinearity_p=nonlinearity_p)
+        if args["decay"] == "depth":
+            layer = residual_block(layer, 64, survival_p=linear_decay(l,L), nonlinearity_p=None)
+        elif args["decay"] == "nonlinearity":
+            layer = residual_block(layer, 64, survival_p=None, nonlinearity_p=linear_decay(l,L))
+        elif args["decay"] == "both":
+            layer = residual_block(layer, 64, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L))
         #print linear_decay(l,L)
         l += 1
     #print "l, L =", l, L
@@ -504,9 +529,9 @@ if "CIFAR10_EXP_2" in os.environ:
             )
 
 
-# In[71]:
+# In[19]:
 
-# linear decay schedule
+# linear decay schedule for stochastic depth
 if "CIFAR10_EXP_3" in os.environ:
     out_folder = "output_stochastic_depth_resnet_new"
     for replicate in [0,1,2]:
@@ -519,7 +544,59 @@ if "CIFAR10_EXP_3" in os.environ:
             continue
         train(
             get_net(
-                yu_cifar10_net_decay({}),
+                yu_cifar10_net_decay({"decay":"depth"}),
+                (X_train, y_train, X_valid, y_valid), 
+                {"batch_size": 128}
+            ),
+            num_epochs=40,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False
+        )
+
+
+# In[26]:
+
+# linear decay schedule for stochastic nonlinearity
+if "CIFAR10_EXP_4" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0,1,2]:
+        #old experiments used this
+        #np.random.seed(replicate)
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/stochastic_nonlinearity_decay0.5.%i" % (out_folder, replicate)
+        if os.path.isfile("%s.txt" % out_file):
+            continue
+        train(
+            get_net(
+                yu_cifar10_net_decay({"decay":"nonlinearity"}),
+                (X_train, y_train, X_valid, y_valid), 
+                {"batch_size": 128}
+            ),
+            num_epochs=40,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False
+        )
+
+
+# In[27]:
+
+# linear decay schedule for stochastic nonlinearity
+if "CIFAR10_EXP_5" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0,1,2]:
+        #old experiments used this
+        #np.random.seed(replicate)
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/stochastic_both_decay0.5.%i" % (out_folder, replicate)
+        if os.path.isfile("%s.txt" % out_file):
+            continue
+        train(
+            get_net(
+                yu_cifar10_net_decay({"decay":"both"}),
                 (X_train, y_train, X_valid, y_valid), 
                 {"batch_size": 128}
             ),
