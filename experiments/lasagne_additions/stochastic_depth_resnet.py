@@ -382,7 +382,7 @@ def get_net(l_out, data, args={}):
     }
 
 
-# In[13]:
+# In[31]:
 
 def train(net_cfg, 
           num_epochs,
@@ -447,6 +447,7 @@ def train(net_cfg,
                 "%i,%f,%f,%f,%f\n" %
                     (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, time_taken) 
             )
+            f.flush()
         if print_out:
             print "%i,%f,%f,%f,%f" %                 (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, time_taken)
         #print valid_loss
@@ -461,9 +462,9 @@ def train(net_cfg,
 
 # ----
 
-# In[22]:
+# In[30]:
 
-os.environ["QUICK"]="1"
+"""
 if "QUICK" in os.environ:
     train(
         get_net(
@@ -476,6 +477,7 @@ if "QUICK" in os.environ:
         out_file="/tmp/hello",
         debug=True
     )
+"""
 
 
 # -----
@@ -662,6 +664,53 @@ if "CIFAR10_EXP_8" in os.environ:
                 {"batch_size": 128}
             ),
             num_epochs=200,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False
+        )
+
+
+# In[27]:
+
+# long experiment for stochastic depth using rmsprop... just curious
+if "CIFAR10_EXP_7R" in os.environ and "AUGMENT" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        out_file = "%s/long_augment_rmsprop_stochastic_depth_decay0.5.%i" % (out_folder, replicate)
+        if os.path.isfile("%s.txt" % out_file):
+            continue
+        train(
+            get_net(
+                yu_cifar10_net_decay({"decay":"depth"}),
+                (X_train, y_train, X_valid, y_valid), 
+                {"batch_size": 128, "rmsprop": True}
+            ),
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False
+        )
+
+
+# In[28]:
+
+# long experiment for stochastic nonlinearity... just curious
+if "CIFAR10_EXP_8R" in os.environ and "AUGMENT" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_augment_rmsprop_stochastic_nonlinearity_decay0.5.%i" % (out_folder, replicate)
+        if os.path.isfile("%s.txt" % out_file):
+            continue
+        train(
+            get_net(
+                yu_cifar10_net_decay({"decay":"nonlinearity"}),
+                (X_train, y_train, X_valid, y_valid), 
+                {"batch_size": 128, "rmsprop": True}
+            ),
+            num_epochs=1000,
             data=(X_train, y_train, X_valid, y_valid),
             out_file=out_file,
             debug=False
