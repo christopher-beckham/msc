@@ -3,7 +3,7 @@
 
 # todo: move to lasagne recipes fork, and import the cifar10 data loader, and run exps on cuda4
 
-# In[1]:
+# In[9]:
 
 import theano
 from theano import tensor as T
@@ -46,7 +46,7 @@ import math
 
 # We keep all the contents of the tensor with survival probability $p$, so the expectation at test time is also $p$.
 
-# In[4]:
+# In[2]:
 
 class BinomialDropLayer(Layer):
     def __init__(self, incoming, p=0.5, **kwargs):
@@ -66,7 +66,7 @@ class BinomialDropLayer(Layer):
             return mask*input
 
 
-# In[5]:
+# In[ ]:
 
 class IfElseDropLayer(Layer):
     def __init__(self, incoming, p=0.5, **kwargs):
@@ -85,7 +85,7 @@ class IfElseDropLayer(Layer):
             )
 
 
-# In[6]:
+# In[ ]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, **kwargs):
@@ -111,7 +111,7 @@ class SkippableNonlinearityLayer(Layer):
                 return mask*input + (1-mask)*self.nonlinearity(input) 
 
 
-# In[7]:
+# In[ ]:
 
 class MoreSkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5,
@@ -134,7 +134,7 @@ class MoreSkippableNonlinearityLayer(Layer):
 
 # There is a difference between this residual block method and the one that is defined in [link]. When the number of filters is different to the layer's output shape (or the stride is different), instead of using a convolution to make things compatible, we use an average pooling with a pool size of 1 and a the defined stride, followed by (if necessary) adding extra zero-padded feature maps. This is because this is how the authors in [link] have defined it.
 
-# In[8]:
+# In[3]:
 
 def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearity_p=None):
     conv = layer
@@ -165,7 +165,7 @@ def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearit
         return MoreSkippableNonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
 
 
-# In[9]:
+# In[4]:
 
 def yu_cifar10_net(args):
     # Architecture from:
@@ -192,7 +192,7 @@ def yu_cifar10_net(args):
     return layer
 
 
-# In[10]:
+# In[5]:
 
 def linear_decay(l, L, pL=0.5):
     assert l <= L
@@ -201,7 +201,7 @@ def linear_decay(l, L, pL=0.5):
     return 1.0 - ((l/L)*(1-pL))
 
 
-# In[21]:
+# In[6]:
 
 def yu_cifar10_net_decay(args):
     # Architecture from:
@@ -265,7 +265,7 @@ def yu_cifar10_net_decay(args):
     return layer
 
 
-# In[25]:
+# In[7]:
 
 def debug_net(args):
     layer = InputLayer( (None, 3, 32, 32) )
@@ -281,17 +281,21 @@ def debug_net(args):
 
 # ----
 
-# In[87]:
+# In[15]:
 
 data = deep_residual_learning_CIFAR10.load_data()
 if "QUICK" in os.environ:
     sys.stderr.write("loading smaller version of cifar10...\n")
     X_train_and_valid, y_train_and_valid, X_test, y_test =         data["X_train"][0:500], data["Y_train"][0:500], data["X_test"][0:500], data["Y_test"][0:500]
-else:   
-    X_train_and_valid, y_train_and_valid, X_test, y_test =         data["X_train"][0:50000], data["Y_train"][0:50000], data["X_test"], data["Y_test"]
+else:
+    if "AUGMENT" not in os.environ:
+        X_train_and_valid, y_train_and_valid, X_test, y_test =             data["X_train"][0:50000], data["Y_train"][0:50000], data["X_test"], data["Y_test"]
+    else:
+        sys.stderr.write("data augmentation on...\n")
+        X_train_and_valid, y_train_and_valid, X_test, y_test =             data["X_train"], data["Y_train"], data["X_test"], data["Y_test"]
 
 
-# In[88]:
+# In[18]:
 
 X_train = X_train_and_valid[ 0 : 0.9*X_train_and_valid.shape[0] ]
 y_train = y_train_and_valid[ 0 : 0.9*y_train_and_valid.shape[0] ]
@@ -299,7 +303,7 @@ X_valid = X_train_and_valid[ 0.9*X_train_and_valid.shape[0] :: ]
 y_valid = y_train_and_valid[ 0.9*y_train_and_valid.shape[0] :: ]
 
 
-# In[89]:
+# In[19]:
 
 X_train = theano.shared(np.asarray(X_train, dtype=theano.config.floatX), borrow=True)
 y_train = theano.shared(np.asarray(y_train, dtype=theano.config.floatX), borrow=True)
@@ -311,7 +315,7 @@ y_test = theano.shared(np.asarray(y_test, dtype=theano.config.floatX), borrow=Tr
 
 # -----
 
-# In[110]:
+# In[11]:
 
 def get_batch_idxs(x, bs):
     b = 0
@@ -326,7 +330,7 @@ def get_batch_idxs(x, bs):
     return arr
 
 
-# In[111]:
+# In[12]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -378,7 +382,7 @@ def get_net(l_out, data, args={}):
     }
 
 
-# In[39]:
+# In[13]:
 
 def train(net_cfg, 
           num_epochs,
@@ -388,6 +392,7 @@ def train(net_cfg,
           debug=False,
           resume=False):
     # prepare the out_file
+    l_out = net_cfg["l_out"]
     f = None
     if resume == False:
         if out_file != None:
@@ -399,7 +404,6 @@ def train(net_cfg,
         sys.stderr.write("resuming training...\n")
         if out_file != None:
             f = open("%s.txt" % out_file, "ab")
-        l_out = net_cfg["l_out"]
         with open("%s.model" % out_file) as g:
             set_all_param_values(l_out, pickle.load(g))          
     # extract functions
@@ -457,8 +461,9 @@ def train(net_cfg,
 
 # ----
 
-# In[124]:
+# In[22]:
 
+os.environ["QUICK"]="1"
 if "QUICK" in os.environ:
     train(
         get_net(
@@ -468,7 +473,7 @@ if "QUICK" in os.environ:
         ),
         num_epochs=20,
         data=(X_train, y_train, X_valid, y_valid),
-        out_file=None,
+        out_file="/tmp/hello",
         debug=True
     )
 
@@ -609,7 +614,7 @@ if "CIFAR10_EXP_5" in os.environ:
 
 # ----
 
-# In[38]:
+# In[23]:
 
 # long experiment for stochastic depth
 if "CIFAR10_EXP_7" in os.environ:
@@ -617,7 +622,10 @@ if "CIFAR10_EXP_7" in os.environ:
     for replicate in [0]:
         lasagne.random.set_rng(np.random.RandomState(replicate))
         this_args = {}
-        out_file = "%s/long_stochastic_depth_decay0.5.%i" % (out_folder, replicate)
+        if "AUGMENT" not in os.environ:
+            out_file = "%s/long_stochastic_depth_decay0.5.%i" % (out_folder, replicate)
+        else:
+            out_file = "%s/long_augment_stochastic_depth_decay0.5.%i" % (out_folder, replicate)
         if os.path.isfile("%s.txt" % out_file):
             continue
         train(
@@ -633,7 +641,7 @@ if "CIFAR10_EXP_7" in os.environ:
         )
 
 
-# In[37]:
+# In[24]:
 
 # long experiment for stochastic nonlinearity
 if "CIFAR10_EXP_8" in os.environ:
@@ -641,7 +649,10 @@ if "CIFAR10_EXP_8" in os.environ:
     for replicate in [0]:
         lasagne.random.set_rng(np.random.RandomState(replicate))
         this_args = {}
-        out_file = "%s/long_stochastic_nonlinearity_decay0.5.%i" % (out_folder, replicate)
+        if "AUGMENT" not in os.environ:
+            out_file = "%s/long_stochastic_nonlinearity_decay0.5.%i" % (out_folder, replicate)
+        else:
+            out_file = "%s/long_augment_stochastic_nonlinearity_decay0.5.%i" % (out_folder, replicate)
         if os.path.isfile("%s.txt" % out_file):
             continue
         train(
