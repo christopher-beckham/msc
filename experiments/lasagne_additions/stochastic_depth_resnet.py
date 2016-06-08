@@ -3,7 +3,7 @@
 
 # todo: move to lasagne recipes fork, and import the cifar10 data loader, and run exps on cuda4
 
-# In[9]:
+# In[1]:
 
 import theano
 from theano import tensor as T
@@ -134,9 +134,19 @@ class MoreSkippableNonlinearityLayer(Layer):
 
 # There is a difference between this residual block method and the one that is defined in [link]. When the number of filters is different to the layer's output shape (or the stride is different), instead of using a convolution to make things compatible, we use an average pooling with a pool size of 1 and a the defined stride, followed by (if necessary) adding extra zero-padded feature maps. This is because this is how the authors in [link] have defined it.
 
-# In[3]:
+# In[32]:
 
-def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearity_p=None):
+def get_init(name):
+    if name == "glorot":
+        return GlorotUniform()
+    else:
+        print "yah"
+        return HeNormal(gain="relu")
+
+
+# In[12]:
+
+def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearity_p=None, args={}):
     conv = layer
     if stride > 1:
         layer = Pool2DLayer(layer, pool_size=1, stride=stride, mode="average_inc_pad")
@@ -148,14 +158,14 @@ def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearit
             width_tp = (((diff/2)+1, diff/2),)
         layer = pad(layer, batch_ndim=1, width=width_tp)
     conv = Conv2DLayer(conv, num_filters=n_out_channels,
-                       filter_size=(3,3), stride=(stride,stride), pad=(1,1), nonlinearity=linear)
+                       filter_size=(3,3), stride=(stride,stride), pad=(1,1), nonlinearity=linear, W=get_init(args["init"]))
     conv = BatchNormLayer(conv)
     if nonlinearity_p == None:
         conv = NonlinearityLayer(conv, nonlinearity=rectify)
     else:
         conv = MoreSkippableNonlinearityLayer(conv, p=nonlinearity_p, nonlinearity=rectify)
     conv = Conv2DLayer(conv, num_filters=n_out_channels,
-                       filter_size=(3,3), stride=(1,1), pad=(1,1), nonlinearity=linear)
+                       filter_size=(3,3), stride=(1,1), pad=(1,1), nonlinearity=linear, W=get_init(args["init"]))
     conv = BatchNormLayer(conv)
     if survival_p != None:
         conv = BinomialDropLayer(conv, p=survival_p)
@@ -165,7 +175,7 @@ def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearit
         return MoreSkippableNonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
 
 
-# In[4]:
+# In[15]:
 
 def yu_cifar10_net(args):
     # Architecture from:
@@ -174,25 +184,26 @@ def yu_cifar10_net(args):
     survival_p = args["survival_p"]
     nonlinearity_p = args["nonlinearity_p"]
     layer = InputLayer( (None, 3, 32, 32) )
-    layer = Conv2DLayer(layer, num_filters=16, filter_size=3, stride=1, pad='same')
+    layer = Conv2DLayer(layer, num_filters=16, filter_size=3, stride=1, pad='same', W=get_init(args["init"]))
     #layer = Pool2DLayer(layer, 2)
     for _ in range(N):
-        layer = residual_block(layer, 16, survival_p=survival_p, nonlinearity_p=args["nonlinearity_p"])
-    layer = residual_block(layer, 32, stride=2, survival_p=survival_p, nonlinearity_p=args["nonlinearity_p"])
+        layer = residual_block(layer, 16, survival_p=survival_p, nonlinearity_p=args["nonlinearity_p"], args=args)
+    layer = residual_block(layer, 32, stride=2, survival_p=survival_p, nonlinearity_p=args["nonlinearity_p"], args=args)
     for _ in range(N):
-        layer = residual_block(layer, 32, survival_p=survival_p, nonlinearity_p=args["nonlinearity_p"])
-    layer = residual_block(layer, 64, stride=2, survival_p=survival_p, nonlinearity_p=args["nonlinearity_p"])
+        layer = residual_block(layer, 32, survival_p=survival_p, nonlinearity_p=args["nonlinearity_p"], args=args)
+    layer = residual_block(layer, 64, stride=2, survival_p=survival_p, nonlinearity_p=args["nonlinearity_p"], args=args)
     for _ in range(N):
-        layer = residual_block(layer, 64, survival_p=survival_p, nonlinearity_p=args["nonlinearity_p"])
+        layer = residual_block(layer, 64, survival_p=survival_p, nonlinearity_p=args["nonlinearity_p"], args=args)
     layer = Pool2DLayer(layer, pool_size=8, stride=1, mode="average_inc_pad")
-    layer = DenseLayer(layer, num_units=10, nonlinearity=softmax)
+    layer = DenseLayer(layer, num_units=10, nonlinearity=softmax,
+                       W=GlorotUniform() if args["init"] == "glorot" else HeNormal())
     for layer in get_all_layers(layer):
         print layer, layer.output_shape
     print "number of params:", count_params(layer)
     return layer
 
 
-# In[5]:
+# In[16]:
 
 def linear_decay(l, L, pL=0.5):
     assert l <= L
@@ -201,7 +212,7 @@ def linear_decay(l, L, pL=0.5):
     return 1.0 - ((l/L)*(1-pL))
 
 
-# In[6]:
+# In[17]:
 
 def yu_cifar10_net_decay(args):
     # Architecture from:
@@ -215,50 +226,50 @@ def yu_cifar10_net_decay(args):
     L = 3*N + 2
     for _ in range(N):
         if args["decay"] == "depth":
-            layer = residual_block(layer, 16, survival_p=linear_decay(l,L), nonlinearity_p=None)
+            layer = residual_block(layer, 16, survival_p=linear_decay(l,L), nonlinearity_p=None, args=args)
         elif args["decay"] == "nonlinearity":
-            layer = residual_block(layer, 16, survival_p=None, nonlinearity_p=linear_decay(l,L))
+            layer = residual_block(layer, 16, survival_p=None, nonlinearity_p=linear_decay(l,L),args=args)
         elif args["decay"] == "both":
-            layer = residual_block(layer, 16, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L))
+            layer = residual_block(layer, 16, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L),args=args)
         #print linear_decay(l,L)
         l += 1
     if args["decay"] == "depth":
-        layer = residual_block(layer, 32, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=None)
+        layer = residual_block(layer, 32, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=None,args=args)
     elif args["decay"] == "nonlinearity":
-        layer = residual_block(layer, 32, stride=2, survival_p=None, nonlinearity_p=linear_decay(l,L))
+        layer = residual_block(layer, 32, stride=2, survival_p=None, nonlinearity_p=linear_decay(l,L),args=args)
     elif args["decay"] == "both":
-        layer = residual_block(layer, 32, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L))
+        layer = residual_block(layer, 32, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L),args=args)
     #print linear_decay(l,L)
     l += 1
     for _ in range(N):
         if args["decay"] == "depth":
-            layer = residual_block(layer, 32, survival_p=linear_decay(l,L), nonlinearity_p=None)
+            layer = residual_block(layer, 32, survival_p=linear_decay(l,L), nonlinearity_p=None,args=args)
         elif args["decay"] == "nonlinearity":
-            layer = residual_block(layer, 32, survival_p=None, nonlinearity_p=linear_decay(l,L))
+            layer = residual_block(layer, 32, survival_p=None, nonlinearity_p=linear_decay(l,L), args=args)
         elif args["decay"] == "both":
-            layer = residual_block(layer, 32, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L))
+            layer = residual_block(layer, 32, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L), args=args)
         #print linear_decay(l,L)
         l += 1
     if args["decay"] == "depth":
-        layer = residual_block(layer, 64, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=None)
+        layer = residual_block(layer, 64, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=None, args=args)
     elif args["decay"] == "nonlinearity":
-        layer = residual_block(layer, 64, stride=2, survival_p=None, nonlinearity_p=linear_decay(l,L))
+        layer = residual_block(layer, 64, stride=2, survival_p=None, nonlinearity_p=linear_decay(l,L), args=args)
     elif args["decay"] == "both":
-        layer = residual_block(layer, 64, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L))
+        layer = residual_block(layer, 64, stride=2, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L), args=args)
     #print linear_decay(l,L)
     l += 1
     for _ in range(N):
         if args["decay"] == "depth":
-            layer = residual_block(layer, 64, survival_p=linear_decay(l,L), nonlinearity_p=None)
+            layer = residual_block(layer, 64, survival_p=linear_decay(l,L), nonlinearity_p=None, args=args)
         elif args["decay"] == "nonlinearity":
-            layer = residual_block(layer, 64, survival_p=None, nonlinearity_p=linear_decay(l,L))
+            layer = residual_block(layer, 64, survival_p=None, nonlinearity_p=linear_decay(l,L), args=args)
         elif args["decay"] == "both":
-            layer = residual_block(layer, 64, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L))
+            layer = residual_block(layer, 64, survival_p=linear_decay(l,L), nonlinearity_p=linear_decay(l,L), args=args)
         #print linear_decay(l,L)
         l += 1
     #print "l, L =", l, L
     layer = Pool2DLayer(layer, pool_size=8, stride=1, mode="average_inc_pad")
-    layer = DenseLayer(layer, num_units=10, nonlinearity=softmax)
+    layer = DenseLayer(layer, num_units=10, nonlinearity=softmax, W=GlorotUniform() if args["init"] == "glorot" else HeNormal())
     for layer in get_all_layers(layer):
         print layer, layer.output_shape
     print "number of params:", count_params(layer)
@@ -281,7 +292,7 @@ def debug_net(args):
 
 # ----
 
-# In[15]:
+# In[19]:
 
 data = deep_residual_learning_CIFAR10.load_data()
 if "QUICK" in os.environ:
@@ -295,7 +306,7 @@ else:
         X_train_and_valid, y_train_and_valid, X_test, y_test =             data["X_train"], data["Y_train"], data["X_test"], data["Y_test"]
 
 
-# In[18]:
+# In[20]:
 
 X_train = X_train_and_valid[ 0 : 0.9*X_train_and_valid.shape[0] ]
 y_train = y_train_and_valid[ 0 : 0.9*y_train_and_valid.shape[0] ]
@@ -303,7 +314,7 @@ X_valid = X_train_and_valid[ 0.9*X_train_and_valid.shape[0] :: ]
 y_valid = y_train_and_valid[ 0.9*y_train_and_valid.shape[0] :: ]
 
 
-# In[19]:
+# In[21]:
 
 X_train = theano.shared(np.asarray(X_train, dtype=theano.config.floatX), borrow=True)
 y_train = theano.shared(np.asarray(y_train, dtype=theano.config.floatX), borrow=True)
@@ -315,7 +326,7 @@ y_test = theano.shared(np.asarray(y_test, dtype=theano.config.floatX), borrow=Tr
 
 # -----
 
-# In[11]:
+# In[22]:
 
 def get_batch_idxs(x, bs):
     b = 0
@@ -330,7 +341,7 @@ def get_batch_idxs(x, bs):
     return arr
 
 
-# In[12]:
+# In[34]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -350,7 +361,7 @@ def get_net(l_out, data, args={}):
         grads = total_norm_constraint( T.grad(loss, params), max_norm=args["max_norm"])
     else:
         grads = T.grad(loss, params)
-    learning_rate = 0.01 if "learning_rate" not in args else args["learning_rate"]
+    learning_rate = theano.shared(0.01) if "learning_rate" not in args else theano.shared(args["learning_rate"])
     momentum = 0.9 if "momentum" not in args else args["momentum"]
     if "rmsprop" in args:
         sys.stderr.write("using rmsprop instead of nesterov momentum...\n")
@@ -378,11 +389,12 @@ def get_net(l_out, data, args={}):
         "preds_fn": preds_fn,
         "l_out": l_out,
         "train_idxs": get_batch_idxs(X_train.get_value(), bs),
-        "valid_idxs": get_batch_idxs(X_valid.get_value(), bs)
+        "valid_idxs": get_batch_idxs(X_valid.get_value(), bs),
+        "learning_rate": learning_rate
     }
 
 
-# In[31]:
+# In[35]:
 
 def train(net_cfg, 
           num_epochs,
@@ -390,7 +402,8 @@ def train(net_cfg,
           out_file=None,
           print_out=True,
           debug=False,
-          resume=False):
+          resume=False,
+          schedule={}):
     # prepare the out_file
     l_out = net_cfg["l_out"]
     f = None
@@ -409,6 +422,7 @@ def train(net_cfg,
     # extract functions
     X_train, y_train, X_valid, y_valid = data
     train_fn, loss_fn, preds_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"]
+    learning_rate = net_cfg["learning_rate"]
     
     # training
     train_idxs, valid_idxs = net_cfg["train_idxs"], net_cfg["valid_idxs"]
@@ -416,6 +430,11 @@ def train(net_cfg,
     if debug:
         sys.stderr.write("idxs: %s\n" % train_idxs)
     for epoch in range(0, num_epochs):
+        
+        if epoch+1 in schedule:
+            sys.stderr.write("changing learning rate to: %f" % schedule[epoch+1])
+            learning_rate.set_value( schedule[epoch+1] )
+        
         this_train_losses = []
         np.random.shuffle(train_idxs)
         if debug:
@@ -715,6 +734,40 @@ if "CIFAR10_EXP_8R" in os.environ and "AUGMENT" in os.environ:
             out_file=out_file,
             debug=False
         )
+
+
+# -----
+
+# We want to try and reproduce the results as best as possible from: https://github.com/yueatsprograms/Stochastic_Depth/blob/master/main.lua
+# 
+# Need to:
+# 
+# * Use He init
+# * Use learning rate schedule
+# * Do the random translation crop thing
+# * Use an L2 weight decay of 1e-4
+
+# In[36]:
+
+if "LONG_BASELINE" in os.environ and "AUGMENT" in os.environ:  
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_baseline_basic_augment.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
+                (X_train, y_train, X_valid, y_valid), 
+                {"batch_size": 128, "l2":1e-4}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            schedule={250: 0.001, 375: 0.0001}
+        )
+# 0.5, 0.75 for cifar10
 
 
 # -----
