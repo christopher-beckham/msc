@@ -3,7 +3,7 @@
 
 # todo: move to lasagne recipes fork, and import the cifar10 data loader, and run exps on cuda4
 
-# In[1]:
+# In[7]:
 
 import theano
 from theano import tensor as T
@@ -276,7 +276,7 @@ def yu_cifar10_net_decay(args):
     return layer
 
 
-# In[7]:
+# In[16]:
 
 def debug_net(args):
     layer = InputLayer( (None, 3, 32, 32) )
@@ -292,36 +292,56 @@ def debug_net(args):
 
 # ----
 
-# In[19]:
+# In[4]:
 
+"""
 data = deep_residual_learning_CIFAR10.load_data()
 if "QUICK" in os.environ:
     sys.stderr.write("loading smaller version of cifar10...\n")
-    X_train_and_valid, y_train_and_valid, X_test, y_test =         data["X_train"][0:500], data["Y_train"][0:500], data["X_test"][0:500], data["Y_test"][0:500]
+    X_train_and_valid, y_train_and_valid, X_test, y_test = \
+        data["X_train"][0:500], data["Y_train"][0:500], data["X_test"][0:500], data["Y_test"][0:500]
 else:
     if "AUGMENT" not in os.environ:
-        X_train_and_valid, y_train_and_valid, X_test, y_test =             data["X_train"][0:50000], data["Y_train"][0:50000], data["X_test"], data["Y_test"]
+        X_train_and_valid, y_train_and_valid, X_test, y_test = \
+            data["X_train"][0:50000], data["Y_train"][0:50000], data["X_test"], data["Y_test"]
     else:
         sys.stderr.write("data augmentation on...\n")
-        X_train_and_valid, y_train_and_valid, X_test, y_test =             data["X_train"], data["Y_train"], data["X_test"], data["Y_test"]
+        X_train_and_valid, y_train_and_valid, X_test, y_test = \
+            data["X_train"], data["Y_train"], data["X_test"], data["Y_test"]
+"""
 
 
-# In[20]:
+# In[5]:
 
+"""
 X_train = X_train_and_valid[ 0 : 0.9*X_train_and_valid.shape[0] ]
 y_train = y_train_and_valid[ 0 : 0.9*y_train_and_valid.shape[0] ]
 X_valid = X_train_and_valid[ 0.9*X_train_and_valid.shape[0] :: ]
 y_valid = y_train_and_valid[ 0.9*y_train_and_valid.shape[0] :: ]
+"""
 
 
-# In[21]:
+# In[2]:
 
+"""
 X_train = theano.shared(np.asarray(X_train, dtype=theano.config.floatX), borrow=True)
 y_train = theano.shared(np.asarray(y_train, dtype=theano.config.floatX), borrow=True)
 X_valid = theano.shared(np.asarray(X_valid, dtype=theano.config.floatX), borrow=True)
 y_valid = theano.shared(np.asarray(y_valid, dtype=theano.config.floatX), borrow=True)
 X_test = theano.shared(np.asarray(X_test, dtype=theano.config.floatX), borrow=True)
 y_test = theano.shared(np.asarray(y_test, dtype=theano.config.floatX), borrow=True)
+"""
+
+
+# In[8]:
+
+dat = np.load("cifar10.npz")
+X_train, y_train, X_valid, y_valid = dat["X_train"], dat["y_train"], dat["X_valid"], dat["y_valid"]
+
+
+# In[9]:
+
+X_train.shape, y_train.shape, X_valid.shape, y_valid.shape
 
 
 # -----
@@ -341,7 +361,7 @@ def get_batch_idxs(x, bs):
     return arr
 
 
-# In[34]:
+# In[10]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -371,30 +391,48 @@ def get_net(l_out, data, args={}):
     # index fns
     bs = args["batch_size"]
     X_train, y_train, X_valid, y_valid = data
-    y_train = T.cast(y_train, "int32")
-    y_valid = T.cast(y_valid, "int32")
-    train_fn = theano.function(inputs=[idx], outputs=loss, updates=updates, 
-        givens={X: X_train[idx*bs : (idx+1)*bs], y: y_train[idx*bs : (idx+1)*bs]}
-    )
-    loss_fn = theano.function(inputs=[idx], outputs=loss_det,
-        givens={X: X_valid[idx*bs : (idx+1)*bs], y: y_valid[idx*bs : (idx+1)*bs]}
-    )
-    preds_fn = theano.function(inputs=[idx], outputs=T.argmax(net_out_det,axis=1),
-        givens={X: X_valid[idx*bs : (idx+1)*bs]}
-    )
+    #y_train = T.cast(y_train, "int32")
+    #y_valid = T.cast(y_valid, "int32")
+    train_fn = theano.function(inputs=[X,y], outputs=loss, updates=updates)
+    loss_fn = theano.function(inputs=[X,y], outputs=loss_det)
+    preds_fn = theano.function(inputs=[X], outputs=T.argmax(net_out_det,axis=1))
     
     return {
         "train_fn": train_fn,
         "loss_fn": loss_fn,
         "preds_fn": preds_fn,
         "l_out": l_out,
-        "train_idxs": get_batch_idxs(X_train.get_value(), bs),
-        "valid_idxs": get_batch_idxs(X_valid.get_value(), bs),
-        "learning_rate": learning_rate
+        "learning_rate": learning_rate,
+        "bs": bs
     }
 
 
-# In[35]:
+# In[26]:
+
+def iterate(X_arr, y_arr, bs, augment):
+    assert X_arr.shape[0] == y_arr.shape[0]
+    b = 0
+    while True:
+        if b*bs >= X_arr.shape[0]:
+            break
+        this_X, this_y = X_arr[b*bs:(b+1)*bs], y_arr[b*bs:(b+1)*bs]
+        # we need to do this for the training set
+        # the valid/test sets are ok
+        if augment:
+            # ok, we must take a random crop that is 32x32
+            new_this_X = []
+            for i in range(0, this_X.shape[0]):
+                rand_x, rand_y = np.random.randint(0,9), np.random.randint(0,9)
+                new_this_X.append(this_X[i, :, rand_x : rand_x+32, rand_y : rand_y+32])
+            new_this_X = np.asarray(new_this_X, dtype=this_X.dtype)
+            yield new_this_X, this_y
+        else:
+            yield this_X, this_y
+        # ---
+        b += 1
+
+
+# In[31]:
 
 def train(net_cfg, 
           num_epochs,
@@ -423,9 +461,10 @@ def train(net_cfg,
     X_train, y_train, X_valid, y_valid = data
     train_fn, loss_fn, preds_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"]
     learning_rate = net_cfg["learning_rate"]
+    bs = net_cfg["bs"]
     
     # training
-    train_idxs, valid_idxs = net_cfg["train_idxs"], net_cfg["valid_idxs"]
+    train_idxs = [x for x in range(0, X_train.shape[0])]
     
     if debug:
         sys.stderr.write("idxs: %s\n" % train_idxs)
@@ -435,30 +474,28 @@ def train(net_cfg,
             sys.stderr.write("changing learning rate to: %f" % schedule[epoch+1])
             learning_rate.set_value( schedule[epoch+1] )
         
-        this_train_losses = []
         np.random.shuffle(train_idxs)
-        if debug:
-            sys.stderr.write("%s\n" % train_idxs)
+        X_train = X_train[train_idxs]
+        y_train = y_train[train_idxs]
         
         # training loop
-        t0 = time()
         this_train_losses = []
-        for i in train_idxs:
-            loss_for_this_batch = train_fn(i)
-            this_train_losses.append( loss_for_this_batch )
+        t0 = time()
+        for X_train_batch, y_train_batch in iterate(X_train, y_train, bs, True):
+            this_train_losses.append( train_fn(X_train_batch, y_train_batch) )
         time_taken = time() - t0
         
         # validation loss loop
         this_valid_losses = []
-        for i in valid_idxs:
-            this_valid_losses.append( loss_fn(i) )
+        for X_valid_batch, y_valid_batch in iterate(X_valid, y_valid, bs, False):
+            this_valid_losses.append( loss_fn(X_valid_batch, y_valid_batch) )
         avg_valid_loss = np.mean(this_valid_losses)
         
         # validation accuracy loop
         this_valid_preds = []
-        for i in valid_idxs:
-            this_valid_preds += preds_fn(i).tolist()
-        valid_acc = np.mean( this_valid_preds == y_valid.get_value() )
+        for X_valid_batch, _ in iterate(X_valid, y_valid, bs, False):
+            this_valid_preds += preds_fn(X_valid_batch).tolist()
+        valid_acc = np.mean( this_valid_preds == y_valid )
         
         ## ------------ ##
         if f != None:
@@ -480,26 +517,6 @@ def train(net_cfg,
 
 
 # ----
-
-# In[30]:
-
-"""
-if "QUICK" in os.environ:
-    train(
-        get_net(
-            debug_net({}),
-            (X_train, y_train, X_valid, y_valid), 
-            {"batch_size": 32}
-        ),
-        num_epochs=20,
-        data=(X_train, y_train, X_valid, y_valid),
-        out_file="/tmp/hello",
-        debug=True
-    )
-"""
-
-
-# -----
 
 # Reproduce stochastic depth paper using varying values of $p$ (ie no linear decay).
 
@@ -755,6 +772,29 @@ if "LONG_BASELINE" in os.environ and "AUGMENT" in os.environ:
         lasagne.random.set_rng(np.random.RandomState(replicate))
         this_args = {}
         out_file = "%s/long_baseline_basic_augment.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
+                (X_train, y_train, X_valid, y_valid), 
+                {"batch_size": 128, "l2":1e-4}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            schedule={250: 0.001, 375: 0.0001}
+        )
+# 0.5, 0.75 for cifar10
+
+
+# In[ ]:
+
+if "LONG_BASELINE_2" in os.environ:  
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_baseline_more_augment.%i" % (out_folder, replicate)
         train(
             get_net(
                 yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
