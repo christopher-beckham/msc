@@ -40,6 +40,14 @@ X_valid = X_train_and_valid[ 0.9*X_train_and_valid.shape[0] :: ]
 y_valid = y_train_and_valid[ 0.9*y_train_and_valid.shape[0] :: ]
 
 
+# In[152]:
+
+X_train_flip = X_train[:,:,:,::-1]
+y_train_flip = y_train
+X_train = np.concatenate((X_train,X_train_flip),axis=0)
+y_train = np.concatenate((y_train,y_train_flip),axis=0)
+
+
 # In[102]:
 
 def disp_form(img):
