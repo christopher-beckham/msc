@@ -1,9 +1,7 @@
 
 # coding: utf-8
 
-# todo: move to lasagne recipes fork, and import the cifar10 data loader, and run exps on cuda4
-
-# In[7]:
+# In[1]:
 
 import theano
 from theano import tensor as T
@@ -20,6 +18,8 @@ import sys
 sys.setrecursionlimit(10000)
 sys.path.append("../../modules/")
 import helper as hp
+
+from lasagne.utils import floatX
 
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
@@ -46,7 +46,7 @@ import math
 
 # We keep all the contents of the tensor with survival probability $p$, so the expectation at test time is also $p$.
 
-# In[2]:
+# In[21]:
 
 class BinomialDropLayer(Layer):
     def __init__(self, incoming, p=0.5, **kwargs):
@@ -66,7 +66,7 @@ class BinomialDropLayer(Layer):
             return mask*input
 
 
-# In[ ]:
+# In[22]:
 
 class IfElseDropLayer(Layer):
     def __init__(self, incoming, p=0.5, **kwargs):
@@ -85,7 +85,7 @@ class IfElseDropLayer(Layer):
             )
 
 
-# In[ ]:
+# In[23]:
 
 class SkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5, **kwargs):
@@ -111,7 +111,7 @@ class SkippableNonlinearityLayer(Layer):
                 return mask*input + (1-mask)*self.nonlinearity(input) 
 
 
-# In[ ]:
+# In[24]:
 
 class MoreSkippableNonlinearityLayer(Layer):
     def __init__(self, incoming, nonlinearity=rectify, p=0.5,
@@ -134,17 +134,16 @@ class MoreSkippableNonlinearityLayer(Layer):
 
 # There is a difference between this residual block method and the one that is defined in [link]. When the number of filters is different to the layer's output shape (or the stride is different), instead of using a convolution to make things compatible, we use an average pooling with a pool size of 1 and a the defined stride, followed by (if necessary) adding extra zero-padded feature maps. This is because this is how the authors in [link] have defined it.
 
-# In[32]:
+# In[39]:
 
 def get_init(name):
     if name == "glorot":
         return GlorotUniform()
     else:
-        print "yah"
         return HeNormal(gain="relu")
 
 
-# In[12]:
+# In[5]:
 
 def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearity_p=None, args={}):
     conv = layer
@@ -168,14 +167,18 @@ def residual_block(layer, n_out_channels, stride=1, survival_p=None, nonlinearit
                        filter_size=(3,3), stride=(1,1), pad=(1,1), nonlinearity=linear, W=get_init(args["init"]))
     conv = BatchNormLayer(conv)
     if survival_p != None:
-        conv = BinomialDropLayer(conv, p=survival_p)
+        if "use_ifelse_layer" in args:
+            sys.stderr.write("using if else drop layer...\n")
+            conv = IfElseDropLayer(conv, p=survival_p)
+        else:
+            conv = BinomialDropLayer(conv, p=survival_p)
     if nonlinearity_p == None:
         return NonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
     else:
         return MoreSkippableNonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
 
 
-# In[15]:
+# In[27]:
 
 def yu_cifar10_net(args):
     # Architecture from:
@@ -203,7 +206,7 @@ def yu_cifar10_net(args):
     return layer
 
 
-# In[16]:
+# In[28]:
 
 def linear_decay(l, L, pL=0.5):
     assert l <= L
@@ -212,7 +215,7 @@ def linear_decay(l, L, pL=0.5):
     return 1.0 - ((l/L)*(1-pL))
 
 
-# In[17]:
+# In[29]:
 
 def yu_cifar10_net_decay(args):
     # Architecture from:
@@ -276,7 +279,7 @@ def yu_cifar10_net_decay(args):
     return layer
 
 
-# In[16]:
+# In[30]:
 
 def debug_net(args):
     layer = InputLayer( (None, 3, 32, 32) )
@@ -292,51 +295,20 @@ def debug_net(args):
 
 # ----
 
-# In[4]:
+# In[11]:
 
-"""
-data = deep_residual_learning_CIFAR10.load_data()
-if "QUICK" in os.environ:
-    sys.stderr.write("loading smaller version of cifar10...\n")
-    X_train_and_valid, y_train_and_valid, X_test, y_test = \
-        data["X_train"][0:500], data["Y_train"][0:500], data["X_test"][0:500], data["Y_test"][0:500]
+os.path.isfile("cifar10.npz")
+
+
+# In[37]:
+
+if os.path.isfile("cifar10.npz"):
+    dat = np.load("cifar10.npz")
+    X_train, y_train, X_valid, y_valid = dat["X_train"], dat["y_train"], dat["X_valid"], dat["y_valid"]
 else:
-    if "AUGMENT" not in os.environ:
-        X_train_and_valid, y_train_and_valid, X_test, y_test = \
-            data["X_train"][0:50000], data["Y_train"][0:50000], data["X_test"], data["Y_test"]
-    else:
-        sys.stderr.write("data augmentation on...\n")
-        X_train_and_valid, y_train_and_valid, X_test, y_test = \
-            data["X_train"], data["Y_train"], data["X_test"], data["Y_test"]
-"""
-
-
-# In[5]:
-
-"""
-X_train = X_train_and_valid[ 0 : 0.9*X_train_and_valid.shape[0] ]
-y_train = y_train_and_valid[ 0 : 0.9*y_train_and_valid.shape[0] ]
-X_valid = X_train_and_valid[ 0.9*X_train_and_valid.shape[0] :: ]
-y_valid = y_train_and_valid[ 0.9*y_train_and_valid.shape[0] :: ]
-"""
-
-
-# In[2]:
-
-"""
-X_train = theano.shared(np.asarray(X_train, dtype=theano.config.floatX), borrow=True)
-y_train = theano.shared(np.asarray(y_train, dtype=theano.config.floatX), borrow=True)
-X_valid = theano.shared(np.asarray(X_valid, dtype=theano.config.floatX), borrow=True)
-y_valid = theano.shared(np.asarray(y_valid, dtype=theano.config.floatX), borrow=True)
-X_test = theano.shared(np.asarray(X_test, dtype=theano.config.floatX), borrow=True)
-y_test = theano.shared(np.asarray(y_test, dtype=theano.config.floatX), borrow=True)
-"""
-
-
-# In[8]:
-
-dat = np.load("cifar10.npz")
-X_train, y_train, X_valid, y_valid = dat["X_train"], dat["y_train"], dat["X_valid"], dat["y_valid"]
+    sys.stderr.write("loading cifar10 minimal version...\n")
+    dat = np.load("/Volumes/CB_RESEARCH/cifar10/cifar10.npz")
+    X_train, y_train, X_valid, y_valid =         dat["X_train"][0:100], dat["y_train"][0:100], dat["X_valid"][0:100], dat["y_valid"][0:100]
 
 
 # In[9]:
@@ -346,7 +318,7 @@ X_train.shape, y_train.shape, X_valid.shape, y_valid.shape
 
 # -----
 
-# In[22]:
+# In[31]:
 
 def get_batch_idxs(x, bs):
     b = 0
@@ -361,7 +333,7 @@ def get_batch_idxs(x, bs):
     return arr
 
 
-# In[10]:
+# In[32]:
 
 def get_net(l_out, data, args={}):
     # ----
@@ -381,7 +353,7 @@ def get_net(l_out, data, args={}):
         grads = total_norm_constraint( T.grad(loss, params), max_norm=args["max_norm"])
     else:
         grads = T.grad(loss, params)
-    learning_rate = theano.shared(0.01) if "learning_rate" not in args else theano.shared(args["learning_rate"])
+    learning_rate = theano.shared(floatX(0.01)) if "learning_rate" not in args else         theano.shared(floatX(args["learning_rate"]))
     momentum = 0.9 if "momentum" not in args else args["momentum"]
     if "rmsprop" in args:
         sys.stderr.write("using rmsprop instead of nesterov momentum...\n")
@@ -407,7 +379,7 @@ def get_net(l_out, data, args={}):
     }
 
 
-# In[26]:
+# In[33]:
 
 def iterate(X_arr, y_arr, bs, augment):
     assert X_arr.shape[0] == y_arr.shape[0]
@@ -432,7 +404,7 @@ def iterate(X_arr, y_arr, bs, augment):
         b += 1
 
 
-# In[31]:
+# In[34]:
 
 def train(net_cfg, 
           num_epochs,
@@ -440,12 +412,12 @@ def train(net_cfg,
           out_file=None,
           print_out=True,
           debug=False,
-          resume=False,
+          resume=None,
           schedule={}):
     # prepare the out_file
     l_out = net_cfg["l_out"]
     f = None
-    if resume == False:
+    if resume == None:
         if out_file != None:
             f = open("%s.txt" % out_file, "wb")
             f.write("epoch,train_loss,avg_valid_loss,valid_accuracy,time\n")
@@ -455,7 +427,7 @@ def train(net_cfg,
         sys.stderr.write("resuming training...\n")
         if out_file != None:
             f = open("%s.txt" % out_file, "ab")
-        with open("%s.model" % out_file) as g:
+        with open(resume) as g:
             set_all_param_values(l_out, pickle.load(g))          
     # extract functions
     X_train, y_train, X_valid, y_valid = data
@@ -472,7 +444,7 @@ def train(net_cfg,
         
         if epoch+1 in schedule:
             sys.stderr.write("changing learning rate to: %f" % schedule[epoch+1])
-            learning_rate.set_value( schedule[epoch+1] )
+            learning_rate.set_value( floatX(schedule[epoch+1]) )
         
         np.random.shuffle(train_idxs)
         X_train = X_train[train_idxs]
@@ -759,10 +731,10 @@ if "CIFAR10_EXP_8R" in os.environ and "AUGMENT" in os.environ:
 # 
 # Need to:
 # 
-# * Use He init
-# * Use learning rate schedule
-# * Do the random translation crop thing
-# * Use an L2 weight decay of 1e-4
+# * Use He init (done)
+# * Use learning rate schedule (had to determine my own)
+# * Do the random translation crop thing (done)
+# * Use an L2 weight decay of 1e-4 (done)
 
 # In[36]:
 
@@ -787,30 +759,288 @@ if "LONG_BASELINE" in os.environ and "AUGMENT" in os.environ:
 # 0.5, 0.75 for cifar10
 
 
-# In[ ]:
+# -----
+
+# In[33]:
 
 if "LONG_BASELINE_2" in os.environ:  
     out_folder = "output_stochastic_depth_resnet_new"
     for replicate in [0]:
         lasagne.random.set_rng(np.random.RandomState(replicate))
         this_args = {}
-        out_file = "%s/long_baseline_more_augment.%i" % (out_folder, replicate)
+        out_file = "%s/long_baseline_more_augment_lr0.1.leto18.%i" % (out_folder, replicate)
         train(
             get_net(
                 yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
                 (X_train, y_train, X_valid, y_valid), 
-                {"batch_size": 128, "l2":1e-4}
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
             ),
             num_epochs=500,
             data=(X_train, y_train, X_valid, y_valid),
             out_file=out_file,
             debug=False,
-            schedule={250: 0.001, 375: 0.0001}
+            schedule={}
         )
-# 0.5, 0.75 for cifar10
+
+
+# In[1]:
+
+if "LONG_BASELINE_2_RESUME" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_baseline_more_augment_lr0.1_leto18.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
+                (X_train, y_train, X_valid, y_valid),
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            resume="models/long_baseline_more_augment_lr0.1_leto18.0.model.170.bak"
+        )
+
+
+# In[ ]:
+
+if "LONG_BASELINE_2_RESUME_2" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_baseline_more_augment_lr0.1_leto18.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
+                (X_train, y_train, X_valid, y_valid),
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.001}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            resume="models/long_baseline_more_augment_lr0.1_leto18.0.model.220.bak2"
+        )
+
+
+# In[ ]:
+
+if "LONG_DEPTH" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_depth_more_augment_lr0.1.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net_decay({"init":"he", "decay": "depth"}),
+                (X_train, y_train, X_valid, y_valid),
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            schedule={}
+        )
+
+
+# In[ ]:
+
+if "LONG_DEPTH_RESUME" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_depth_more_augment_lr0.1.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net_decay({"init":"he", "decay": "depth"}),
+                (X_train, y_train, X_valid, y_valid),
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            schedule={},
+            resume="models/long_depth_more_augment_lr0.1.0.model.187.bak"
+        )
+
+
+# In[ ]:
+
+if "LONG_DEPTH_RESUME_2" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_depth_more_augment_lr0.1.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net_decay({"init":"he", "decay": "depth"}),
+                (X_train, y_train, X_valid, y_valid),
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.001}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            schedule={},
+            resume="models/long_depth_more_augment_lr0.1.0.model.248.bak2"
+        )
+
+
+# In[6]:
+
+if "LONG_DEPTH_IFELSE" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_depth_ifelse_more_augment_lr0.1.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net_decay({"init":"he", "decay": "depth", "use_ifelse_layer": True}),
+                (X_train, y_train, X_valid, y_valid),
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            schedule={187: 0.01, 248: 0.001}
+        )
+
+
+# In[ ]:
+
+if "LONG_NONLINEARITY" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_nonlinearity_more_augment_lr0.1.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity"}),
+                (X_train, y_train, X_valid, y_valid),
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            schedule={}
+        )
+
+
+# In[ ]:
+
+if "LONG_NONLINEARITY_RESUME" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_nonlinearity_more_augment_lr0.1.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity"}),
+                (X_train, y_train, X_valid, y_valid),
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            schedule={},
+            resume="models/long_nonlinearity_more_augment_lr0.1.0.model.167.bak"
+        )
+
+
+# In[ ]:
+
+if "LONG_NONLINEARITY_RESUME_2" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_nonlinearity_more_augment_lr0.1.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity"}),
+                (X_train, y_train, X_valid, y_valid),
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.001}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            schedule={},
+            resume="models/long_nonlinearity_more_augment_lr0.1.0.model.231.bak2"
+        )
+
+
+# In[ ]:
+
+if "LONG_BOTH" in os.environ:
+    out_folder = "output_stochastic_depth_resnet_new"
+    for replicate in [0]:
+        lasagne.random.set_rng(np.random.RandomState(replicate))
+        this_args = {}
+        out_file = "%s/long_both_more_augment_lr0.1.%i" % (out_folder, replicate)
+        train(
+            get_net(
+                yu_cifar10_net_decay({"init":"he", "decay": "both"}),
+                (X_train, y_train, X_valid, y_valid),
+                {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+            ),
+            num_epochs=500,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file=out_file,
+            debug=False,
+            schedule={}
+        )
 
 
 # -----
+
+# Score the test set with the best baseline model
+
+# In[13]:
+
+X_test, y_test = dat["X_test"], dat["y_test"]
+
+
+# In[17]:
+
+with open("/Users/cjb60/Dropbox/models/long_baseline_more_augment_lr0.1_leto18.0.model.220.bak2") as f:
+    baseline_model = pickle.load(f)
+
+
+# In[41]:
+
+baseline_net = get_net(
+    debug_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
+    (X_train, y_train, X_valid, y_valid),
+    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+)
+#set_all_param_values(baseline_net["l_out"], baseline_model)
+
+
+# In[44]:
+
+np.sum( baseline_net["preds_fn"](X_test) == y_test ) / y_test.shape[0]
+
+
+# In[45]:
+
+baseline_net["preds_fn"](X_test).shape
+
 
 # ## Plot the curves for stochastic depth
 
@@ -899,6 +1129,16 @@ get_ipython().run_cell_magic(u'R', u'-w 480 -h 480', u'\nps = c("")\n\nplot_resu
 # In[31]:
 
 get_ipython().run_cell_magic(u'R', u'', u'ps = c(\n    "p1.000000",\n    "p0.900000",\n    "p0.800000",\n    "p0.700000",\n    "p0.600000",\n    "p0.500000"\n)\nfor(i in 1:length(ps)) {\n    df_nonlinearity = read.csv(paste("output_stochastic_depth_resnet_new/",ps[i],"_stochastic_nonlinearity.",0,".txt",sep=""))\n    df_nonlinearity2 = read.csv(paste("output_stochastic_depth_resnet_new/",ps[i],"_stochastic_nonlinearity.",1,".txt",sep=""))\n    df_nonlinearity3 = read.csv(paste("output_stochastic_depth_resnet_new/",ps[i],"_stochastic_nonlinearity.",2,".txt",sep=""))\n\n    df_stochastic = read.csv(paste("output_stochastic_depth_resnet_new/",ps[i],"_stochastic_depth.",0,".txt",sep=""))\n    df_stochastic2 = read.csv(paste("output_stochastic_depth_resnet_new/",ps[i],"_stochastic_depth.",1,".txt",sep=""))\n    df_stochastic3 = read.csv(paste("output_stochastic_depth_resnet_new/",ps[i],"_stochastic_depth.",2,".txt",sep=""))\n    \n    # valid loss between both\n    plot(df_nonlinearity$valid_accuracy, ylim=c(0,1), type="l", col="blue",\n        ylab="valid accuracy", xlab="epoch", main=paste("stochastic depth vs nonlinearity", ps[i]))\n    lines(df_nonlinearity2$valid_accuracy, col="blue")\n    lines(df_nonlinearity3$valid_accuracy, col="blue")\n    \n    lines(df_stochastic$valid_accuracy, col="red")\n    lines(df_stochastic2$valid_accuracy, col="red")\n    lines(df_stochastic3$valid_accuracy, col="red")\n    \n    legend("bottomright", legend=c("nonlinearity", "depth"), fill=c("blue", "red"))\n    \n}')
+
+
+# In[3]:
+
+get_ipython().run_cell_magic(u'R', u'-w 900 -h 900', u'\npar(mfrow=c(2,2))\n\nplot_lr_lines = function() {\n    abline(v=which(df$epoch == 1)[2], col="black", lty="dotted")\n    abline(v=which(df$epoch == 1)[3], col="black", lty="dotted")\n    abline(v=which(df2$epoch == 1)[2], col="red", lty="dotted")\n    abline(v=which(df2$epoch == 1)[3], col="red", lty="dotted")\n    abline(v=which(df3$epoch == 1)[2], col="orange", lty="dotted")\n    abline(v=which(df3$epoch == 1)[3], col="orange", lty="dotted")\n    abline(v=which(df4$epoch == 1)[2], col="green", lty="dotted")\n    abline(v=which(df4$epoch == 1)[3], col="green", lty="dotted")    \n}\n\ndf = read.csv("output_stochastic_depth_resnet_new/long_baseline_more_augment_lr0.1_leto18.0.txt")\ndf2 = read.csv("output_stochastic_depth_resnet_new/long_depth_more_augment_lr0.1.0.txt")\ndf3 = read.csv("output_stochastic_depth_resnet_new/long_nonlinearity_more_augment_lr0.1.0.txt")\ndf4 = read.csv(\n    "/Users/cjb60/Desktop/lisa_tmp4_2/msc/experiments/lasagne_additions/output_stochastic_depth_resnet_new/long_both_more_augment_lr0.1.0.txt"\n)\n\nlabels=c("baseline", "depth", "nonlinearity", "both")\nfills=c("black", "red", "orange", "green")\n\nplot(df$train_loss, type="l", ylab="train loss", xlab="epoch")\nlines(df2$train_loss, col="red")\nlines(df3$train_loss, col="orange")\nlines(df4$train_loss, col="green")\nplot_lr_lines()\nlegend("topright", legend=labels, fill=fills)\n\nplot(df$avg_valid_loss, type="l", ylim=c(0,2), ylab="valid loss", xlab="epoch")\nlines(df2$avg_valid_loss, col="red")\nlines(df3$avg_valid_loss, col="orange")\nlines(df4$avg_valid_loss, col="green")\nplot_lr_lines()\nlegend("topright", legend=labels, fill=fills)\n\nplot(df$valid_accuracy, type="l", ylim=c(0,1), ylab="valid accuracy", xlab="epoch")\nlines(df2$valid_accuracy, col="red")\nlines(df3$valid_accuracy, col="orange")\nlines(df4$valid_accuracy, col="green")\nplot_lr_lines()\nlegend("topright", legend=labels, fill=fills)\n')
+
+
+# In[2]:
+
+get_ipython().run_cell_magic(u'R', u'-w 900 -h 600', u'\ndf = read.csv("output_stochastic_depth_resnet_new/long_baseline_more_augment_lr0.1_leto18.0.txt")\ndf2 = read.csv("output_stochastic_depth_resnet_new/long_depth_more_augment_lr0.1.0.txt")\ndf3 = read.csv("output_stochastic_depth_resnet_new/long_nonlinearity_more_augment_lr0.1.0.txt")\ndf4 = read.csv(\n    "/Users/cjb60/Desktop/lisa_tmp4_2/msc/experiments/lasagne_additions/output_stochastic_depth_resnet_new/long_both_more_augment_lr0.1.0.txt"\n)\n\nlabels=c("baseline", "depth", "nonlinearity", "both")\nfills=c("black", "red", "orange", "green")\n\nplot(df$valid_accuracy, type="l", ylim=c(0,1), ylab="valid accuracy", xlab="epoch")\nlines(df2$valid_accuracy, col="red")\nlines(df3$valid_accuracy, col="orange")\nlines(df4$valid_accuracy, col="green")\nlegend("topright", legend=labels, fill=fills)\n')
 
 
 # ----
