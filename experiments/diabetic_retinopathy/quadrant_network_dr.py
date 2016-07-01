@@ -15,11 +15,8 @@ import sys
 sys.path.append("../../modules/")
 import helper as hp
 import matplotlib.pyplot as plt
-get_ipython().magic(u'matplotlib inline')
 import draw_net
-from IPython.display import Image
 import numpy as np
-reload(draw_net)
 from skimage import io
 import cPickle as pickle
 import os
@@ -119,6 +116,12 @@ def net(args={}):
     l_bottomleft_right = SliceLayer( SliceLayer(l_in_right, indices=slice(256,512), axis=2), indices=slice(0,256), axis=3 )
     l_topright_right = SliceLayer( SliceLayer(l_in_right, indices=slice(0,256), axis=2), indices=slice(256,512), axis=3 )
     l_bottomright_right = SliceLayer( SliceLayer(l_in_right, indices=slice(256,512), axis=2), indices=slice(256,512), axis=3 ) 
+
+    conv_p = 0.1 if "conv_p" not in args else args["conv_p"]
+    fc_p = 0.5 if "fc_p" not in args else args["fc_p"]
+
+    sys.stderr.write("conv_p = %f\n" % conv_p)
+    sys.stderr.write("fc_p = %f\n" % fc_p)
     
     def net_block(quadrant, dd):
         #l_in = InputLayer(
@@ -139,7 +142,7 @@ def net(args={}):
             stride=2
         )
         # { "type": "CONV", "dropout": 0.1, "num_filters": 64, "filter_size": 3, "pool_size": 3, "pool_stride": 2, "nonlinearity": "LReLU" }
-        l_dropout1 = DropoutLayer(l_pool1, p=0.1)
+        l_dropout1 = DropoutLayer(l_pool1, p=conv_p)
         l_conv2 = Conv2DLayer(
             l_dropout1,
             num_filters=64,
@@ -154,7 +157,7 @@ def net(args={}):
             stride=2
         )
         # { "type": "CONV", "dropout": 0.1, "num_filters": 128, "filter_size": 3, "nonlinearity": "LReLU" },
-        l_dropout2 = DropoutLayer(l_pool2, p=0.1)
+        l_dropout2 = DropoutLayer(l_pool2, p=conv_p)
         l_conv3 = Conv2DLayer(
             l_dropout2,
             num_filters=128,
@@ -164,7 +167,7 @@ def net(args={}):
             b=Constant(0.) if "l_conv3" not in dd else dd["l_conv3"].b
         )
         # { "type": "CONV", "dropout": 0.1, "num_filters": 128, "filter_size": 3, "pool_size": 3, "pool_stride": 2, "nonlinearity": "LReLU" },
-        l_dropout3 = DropoutLayer(l_conv3, p=0.1)
+        l_dropout3 = DropoutLayer(l_conv3, p=conv_p)
         l_conv4 = Conv2DLayer(
             l_dropout3,
             num_filters=128,
@@ -179,7 +182,7 @@ def net(args={}):
             stride=2
         )
         # { "type": "CONV", "dropout": 0.1, "num_filters": 128, "filter_size": 3, "pool_size": 3, "pool_stride": 2, "nonlinearity": "LReLU" },
-        l_dropout4 = DropoutLayer(l_pool3, p=0.1)
+        l_dropout4 = DropoutLayer(l_pool3, p=conv_p)
         l_conv5 = Conv2DLayer(
             l_dropout4,
             num_filters=128,
@@ -195,7 +198,7 @@ def net(args={}):
             stride=2
         )
         # { "type": "CONV", "dropout": 0.1, "num_filters": 256, "filter_size": 3, "pool_size": 2, "pool_stride": 2, "nonlinearity": "LReLU" },
-        l_dropout5 = DropoutLayer(l_pool4, p=0.1)
+        l_dropout5 = DropoutLayer(l_pool4, p=conv_p)
         l_conv6 = Conv2DLayer(
             l_dropout5,
             num_filters=256,
@@ -210,32 +213,46 @@ def net(args={}):
             stride=2
         )
 
+        l_dropout5a = DropoutLayer(l_pool5, p=conv_p)
+        l_conv7 = Conv2DLayer(
+            l_dropout5a,
+            num_filters=512,
+            filter_size=(3,3),
+            nonlinearity=leaky_rectify,
+            W=GlorotUniform(gain="relu") if "l_conv6" not in dd else dd["l_conv6"].W,
+            b=Constant(0.) if "l_conv6" not in dd else dd["l_conv6"].b
+        )
+
         # { "type": "FC", "dropout": 0.5, "num_units": 2048, "pool_size": 2, "nonlinearity": "LReLU" },
-        l_dropout6 = lasagne.layers.DropoutLayer(l_pool5, p=0.5)
+        l_dropout6 = lasagne.layers.DropoutLayer(l_conv7, p=fc_p)
         l_hidden1 = lasagne.layers.DenseLayer(
             l_dropout6,
-            num_units=2048,
+            num_units=512,
             nonlinearity=leaky_rectify,
             W=GlorotUniform(gain="relu") if "l_hidden1" not in dd else dd["l_hidden1"].W,
             b=Constant(0.) if "l_hidden1" not in dd else dd["l_hidden1"].b
         )
-        l_pool6 = lasagne.layers.FeaturePoolLayer(
-            l_hidden1,
-            pool_size=2
-        )
+
+        #l_pool6 = lasagne.layers.FeaturePoolLayer(
+        #    l_hidden1,
+        #    pool_size=2
+        #)
+        
         # { "type": "FC", "dropout": 0.5, "num_units": 2048, "pool_size": 2, "nonlinearity": "LReLU" },
-        l_dropout7 = lasagne.layers.DropoutLayer(l_pool6, p=0.5)
+        l_dropout7 = lasagne.layers.DropoutLayer(l_hidden1, p=fc_p)
         l_hidden2 = lasagne.layers.DenseLayer(
             l_dropout7,
-            num_units=2048,
+            num_units=512,
             nonlinearity=leaky_rectify,
             W=GlorotUniform(gain="relu") if "l_hidden2" not in dd else dd["l_hidden2"].W,
             b=Constant(0.) if "l_hidden2" not in dd else dd["l_hidden2"].b
         )
-        l_pool7 = lasagne.layers.FeaturePoolLayer(
-            l_hidden2,
-            pool_size=2
-        )
+        
+        #l_pool7 = lasagne.layers.FeaturePoolLayer(
+        #    l_hidden2,
+        #    pool_size=2
+        #)
+        
         # { "type": "OUTPUT", "dropout": 0.5, "nonlinearity": "sigmoid" }
         #l_dropout8 = lasagne.layers.DropoutLayer(l_pool7, p=0.5)
         #l_out = lasagne.layers.DenseLayer(
@@ -246,7 +263,8 @@ def net(args={}):
         #)
         #return l_out
 
-        l_out = l_pool7
+        #l_out = l_pool7
+        l_out = l_hidden2
 
         return {
             "l_conv1": l_conv1,
@@ -287,7 +305,7 @@ def net(args={}):
         [l_concat_left, l_concat_right]
     )
     
-    l_dropout = DropoutLayer(l_merge, p=0.5)
+    l_dropout = DropoutLayer(l_merge, p=fc_p)
 
     l_out = lasagne.layers.DenseLayer(
         l_dropout,
@@ -295,6 +313,8 @@ def net(args={}):
         nonlinearity=softmax,
         W=GlorotUniform()
     )
+
+    sys.stderr.write("number of params: %i\n" % count_params(l_out))
     
     return {"l_out": l_out, "l_in_left": l_in_left, "l_in_right": l_in_right}
 
@@ -316,9 +336,9 @@ def iterate(X_arr_left, X_arr_right, y_arr, bs, augment):
         images_for_this_X_right = [ hp.load_image("%s/%s.jpeg" % (DATA_DIR,filename), augment=augment) for filename in this_X_right ]
         images_for_this_X_right = np.asarray(images_for_this_X_right, dtype="float32")
         
-        print images_for_this_X_left.shape
-        print images_for_this_X_right.shape
-        print this_y.shape
+        #print images_for_this_X_left.shape
+        #print images_for_this_X_right.shape
+        #print this_y.shape
 
         yield images_for_this_X_left, images_for_this_X_right, this_y
         
@@ -335,6 +355,7 @@ def train(net_cfg,
           print_out=True,
           debug=False,
           resume=None,
+          augment=True,
           schedule={}):
     # prepare the out_file
     l_out = net_cfg["l_out"]
@@ -352,7 +373,7 @@ def train(net_cfg,
         with open(resume) as g:
             set_all_param_values(l_out, pickle.load(g))
     # save graph of network
-    draw_net.draw_to_file( get_all_layers(l_out), "%s.png" % out_file, verbose=True)
+    #draw_net.draw_to_file( get_all_layers(l_out), "%s.png" % out_file, verbose=True)
     # extract functions
     X_train_left, X_train_right, y_train, X_valid_left, X_valid_right, y_valid = data
     train_fn, loss_fn, preds_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"]
@@ -377,7 +398,7 @@ def train(net_cfg,
         # training loop
         this_train_losses = []
         t0 = time()
-        for X_train_batch_left, X_train_batch_right, y_train_batch in iterate(X_train_left, X_train_right, y_train, bs, True):
+        for X_train_batch_left, X_train_batch_right, y_train_batch in iterate(X_train_left, X_train_right, y_train, bs, augment):
             this_train_losses.append( train_fn(X_train_batch_left, X_train_batch_right, y_train_batch) )
         time_taken = time() - t0
         
@@ -415,18 +436,33 @@ def train(net_cfg,
 
 # In[31]:
 
-draw_net.draw_to_notebook(get_all_layers(net()["l_out"]), verbose=True)
+#draw_net.draw_to_notebook(get_all_layers(net()["l_out"]), verbose=True)
 
 
 
+# train without augmentation and without dropout
+if "EXP1_NO_AUGMENT" in os.environ:
+    seed = 0
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(net, {"kappa_loss": False, "batch_size": 32, "conv_p": 0.0, "fc_p": 0.0 }) 
+    train(
+        cfg, 
+        num_epochs=1000, 
+        data=(X_train_left, X_train_right, y_train, X_valid_left, X_valid_right, y_valid),
+        out_file="output_quadrant/exp1_no-augment.%i" % seed,
+        augment=False
+    )
+
+# train with dropout, don't do augmentation yet
 if "EXP1" in os.environ:
     seed = 0
     lasagne.random.set_rng( np.random.RandomState(seed) )
-    cfg = get_net(net, {"kappa_loss": False, "batch_size": 64 }) 
+    cfg = get_net(net, {"kappa_loss": False, "batch_size": 32, "conv_p": 0.1, "fc_p": 0.5 }) 
     train(
         cfg, 
-        num_epochs=1, 
+        num_epochs=1000, 
         data=(X_train_left, X_train_right, y_train, X_valid_left, X_valid_right, y_valid),
-        out_file="output_quadrant/exp1.%i" % seed
+        out_file="output_quadrant/exp1_no-augment-with-dropout.%i" % seed,
+        augment=False,
+        resume="models/exp1_no-augment-with-dropout.0.model.1"
     )
-
