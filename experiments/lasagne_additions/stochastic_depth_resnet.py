@@ -563,6 +563,7 @@ def train(net_cfg,
           print_out=True,
           debug=False,
           resume=None,
+          augment=True,
           schedule={}):
     # prepare the out_file
     l_out = net_cfg["l_out"]
@@ -603,7 +604,7 @@ def train(net_cfg,
         # training loop
         this_train_losses = []
         t0 = time()
-        for X_train_batch, y_train_batch in iterate(X_train, y_train, bs, True):
+        for X_train_batch, y_train_batch in iterate(X_train, y_train, bs, augment):
             this_train_losses.append( train_fn(X_train_batch, y_train_batch) )
         time_taken = time() - t0
         
