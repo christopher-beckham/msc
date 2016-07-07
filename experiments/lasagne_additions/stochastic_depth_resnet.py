@@ -1419,6 +1419,27 @@ if __name__ == "__main__":
             )
 
 
+    if "BOTH_LESS9_REPLICATE" in os.environ:
+        out_folder = "output_final"
+        for replicate in [1]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/both_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+            )
+            
+
+
     if "BOTH_LESS8" in os.environ:
         out_folder = "output_final"
         for replicate in [0]:
