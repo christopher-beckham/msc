@@ -27,22 +27,24 @@ from time import time
 
 with open("dr.pkl") as f:
     dat = pickle.load(f)
-X_left, X_right, y = dat
+X_left, X_right, y_left, y_right = dat
 X_left = np.asarray(X_left)
 X_right = np.asarray(X_right)
-y = np.asarray(y, dtype="int32")
+y_left = np.asarray(y_left, dtype="int32")
+y_right = np.asarray(y_right, dtype="int32")
 np.random.seed(0)
 idxs = [x for x in range(0, len(X_left))]
 np.random.shuffle(idxs)
 
 X_train_left = X_left[idxs][0 : int(0.9*X_left.shape[0])]
 X_train_right = X_right[idxs][0 : int(0.9*X_right.shape[0])]
-y_train = y[idxs][0 : int(0.9*y.shape[0])]
+y_train_left = y_left[idxs][0 : int(0.9*y_left.shape[0])]
+y_train_right = y_right[idxs][0 : int(0.9*y_left.shape[0])]
 
 X_valid_left = X_left[idxs][int(0.9*X_left.shape[0]) ::]
 X_valid_right = X_right[idxs][int(0.9*X_right.shape[0]) ::]
-y_valid = y[idxs][int(0.9*y.shape[0]) ::]
-
+y_valid_left = y_left[idxs][int(0.9*y_left.shape[0]) ::]
+y_valid_right = y_right[idxs][int(0.9*y_right.shape[0]) ::]
 
 # -----
 
@@ -52,29 +54,40 @@ def get_net(net_fn, args={}):
     # ----
     X_left = T.tensor4('X_left')
     X_right = T.tensor4('X_right')
-    y = T.ivector('y')
+    y_left = T.ivector('y_left')
+    y_right = T.ivector('y_right')
     # ----
     
     cfg = net_fn(args)
-    l_out = cfg["l_out"]
+    l_out_left = cfg["l_out_left"]
+    l_out_right = cfg["l_out_right"]
     l_in_left = cfg["l_in_left"]
     l_in_right = cfg["l_in_right"]
-    
-    net_out = get_output(l_out, {l_in_left: X_left, l_in_right: X_right})
-    net_out_det = get_output(l_out, {l_in_left: X_left, l_in_right: X_right}, deterministic=True)
+    l_out_pseudo = cfg["l_out_pseudo"]
+                        
+    net_out_left, net_out_right = get_output(
+        [l_out_left, l_out_right],
+        {l_in_left: X_left, l_in_right: X_right}
+    )
+    net_out_left_det, net_out_right_det = get_output(
+        [l_out_left, l_out_right],
+        {l_in_left: X_left, l_in_right: X_right},
+        deterministic=True
+    )
     
     if not args["kappa_loss"]:
-        loss = categorical_crossentropy(net_out, y).mean()
-        loss_det = categorical_crossentropy(net_out_det, y).mean()
+        loss = categorical_crossentropy(net_out_left, y_left).mean() + categorical_crossentropy(net_out_right, y_right).mean()
+        loss_det = categorical_crossentropy(net_out_left_det, y_left).mean() + categorical_crossentropy(net_out_right_det, y_right).mean()
     else:
-        loss = get_kappa_loss(5)(net_out, y).mean()
-        loss_det = get_kappa_loss(5)(net_out_det, y).mean()
+        #loss = get_kappa_loss(5)(net_out, y).mean()
+        #loss_det = get_kappa_loss(5)(net_out_det, y).mean()
+        raise NotImplementedError()
     
     if "l2" in args:
         sys.stderr.write("adding l2: %f\n" % args["l2"])
-        loss += args["l2"]*regularize_layer_params(l_out, l2)
-        loss_det += args["l2"]*regularize_layer_params(l_out, l2)
-    params = get_all_params(l_out, trainable=True)
+        loss += args["l2"]*regularize_network_params(l_out_pseudo, l2)
+        loss_det += args["l2"]*regularize_network_params(l_out_pseudo, l2)
+    params = get_all_params(l_out_pseudo, trainable=True)
     sys.stderr.write("params: %s\n" % str(params))
     if "max_norm" in args:
         grads = total_norm_constraint( T.grad(loss, params), max_norm=args["max_norm"])
@@ -89,15 +102,20 @@ def get_net(net_fn, args={}):
         updates = nesterov_momentum(grads, params, learning_rate=learning_rate, momentum=momentum)
     # index fns
     bs = args["batch_size"]
-    train_fn = theano.function(inputs=[X_left,X_right,y], outputs=loss, updates=updates)
-    loss_fn = theano.function(inputs=[X_left,X_right,y], outputs=loss_det)
-    preds_fn = theano.function(inputs=[X_left,X_right], outputs=T.argmax(net_out_det,axis=1))
+    train_fn = theano.function(inputs=[X_left,X_right,y_left,y_right], outputs=loss, updates=updates)
+    loss_fn = theano.function(inputs=[X_left,X_right,y_left,y_right], outputs=loss_det)
+    preds_fn = theano.function(
+        inputs=[X_left,X_right],
+        outputs=[ T.argmax(net_out_left_det,axis=1), T.argmax(net_out_right_det,axis=1) ]
+    )
     
     return {
         "train_fn": train_fn,
         "loss_fn": loss_fn,
         "preds_fn": preds_fn,
-        "l_out": l_out,
+        "l_out_left": l_out_left,
+        "l_out_right": l_out_right,
+        "l_out_pseudo": l_out_pseudo,
         "learning_rate": learning_rate,
         "bs": bs
     }
@@ -473,43 +491,80 @@ def resnet_net(args={}):
     ])
     """
 
-    l_merge = ElemwiseSumLayer([
+    l_merge_left = ElemwiseSumLayer([
         topleft_conv_left, 
         bottomleft_conv_left, 
         topright_conv_left, 
-        bottomright_conv_left,
+        bottomright_conv_left
+    ])
+
+
+    l_merge_right = ElemwiseSumLayer([
         topleft_conv_right, 
         bottomleft_conv_right, 
         topright_conv_right, 
         bottomright_conv_right        
     ])
     
-    l_dropout = DropoutLayer(l_merge, p=args["fc_p"])
+    #l_dropout = DropoutLayer(l_merge, p=args["fc_p"])
 
-    l_out = lasagne.layers.DenseLayer(
-        l_dropout,
+    # left out
+    l_merge_left_sum = ElemwiseSumLayer([
+        l_merge_left,
+        l_merge_right
+    ])
+    l_out_left = DenseLayer(
+        l_merge_left_sum,
         num_units=5,
         nonlinearity=softmax,
         W=HeNormal()
     )
 
-    sys.stderr.write("number of params: %i\n" % count_params(l_out))
+    # right out
+    l_merge_right_sum = ElemwiseSumLayer([
+        l_merge_left,
+        l_merge_right
+    ])
+    l_out_right = DenseLayer(
+        l_merge_right_sum,
+        num_units=5,
+        nonlinearity=softmax,
+        W=HeNormal()
+    )
+
+    l_out_pseudo = ElemwiseSumLayer([l_out_left, l_out_right])
     
-    return {"l_out": l_out, "l_in_left": l_in_left, "l_in_right": l_in_right}
+    
+    
+    #l_out = lasagne.layers.DenseLayer(
+    #    l_dropout,
+    #    num_units=5,
+    #    nonlinearity=softmax,
+    #    W=HeNormal()
+    #)
+
+    sys.stderr.write("number of params: %i\n" % count_params(l_out_pseudo))
+    
+    return {"l_out_pseudo": l_out_pseudo,
+            "l_out_left": l_out_left,
+            "l_out_right": l_out_right,
+            "l_in_left": l_in_left,
+            "l_in_right": l_in_right}
 
 
 
 
 # In[11]:
 
-def iterate(X_arr_left, X_arr_right, y_arr, bs, augment, zmuv):
-    assert X_arr_left.shape[0] == X_arr_right.shape[0] == y_arr.shape[0]
+def iterate(X_arr_left, X_arr_right, y_arr_left, y_arr_right, bs, augment, zmuv):
+    assert X_arr_left.shape[0] == X_arr_right.shape[0] == y_arr_left.shape[0] == y_arr_right.shape[0]
     b = 0
     DATA_DIR = os.environ["DATA_DIR"]
     while True:
         if b*bs >= X_arr_left.shape[0]:
             break
-        this_X_left, this_X_right, this_y = X_arr_left[b*bs:(b+1)*bs], X_arr_right[b*bs:(b+1)*bs], y_arr[b*bs:(b+1)*bs]
+        this_X_left, this_X_right, this_y_left, this_y_right = \
+                        X_arr_left[b*bs:(b+1)*bs], X_arr_right[b*bs:(b+1)*bs], y_arr_left[b*bs:(b+1)*bs], y_arr_right[b*bs:(b+1)*bs]
         # load the images
         images_for_this_X_left = [ hp.load_image_fast("%s/%s.jpeg" % (DATA_DIR,filename), augment=augment, zmuv=zmuv) for filename in this_X_left ]
         images_for_this_X_left = np.asarray(images_for_this_X_left, dtype="float32")
@@ -526,7 +581,7 @@ def iterate(X_arr_left, X_arr_right, y_arr, bs, augment, zmuv):
         #print images_for_this_X_right.shape
         #print this_y.shape
 
-        yield images_for_this_X_left, images_for_this_X_right, this_y
+        yield images_for_this_X_left, images_for_this_X_right, this_y_left, this_y_right
         
         # ---
         b += 1
@@ -545,7 +600,10 @@ def train(net_cfg,
           zmuv=False,
           schedule={}):
     # prepare the out_file
-    l_out = net_cfg["l_out"]
+    l_out_left = net_cfg["l_out_left"]
+    l_out_right = net_cfg["l_out_right"]
+    l_out_pseudo = net_cfg["l_out_pseudo"]
+    
     f = None
     if resume == None:
         if out_file != None:
@@ -558,11 +616,11 @@ def train(net_cfg,
         if out_file != None:
             f = open("%s.txt" % out_file, "ab")
         with open(resume) as g:
-            set_all_param_values(l_out, pickle.load(g))
+            set_all_param_values(l_out_pseudo, pickle.load(g))
     # save graph of network
     #draw_net.draw_to_file( get_all_layers(l_out), "%s.png" % out_file, verbose=True)
     # extract functions
-    X_train_left, X_train_right, y_train, X_valid_left, X_valid_right, y_valid = data
+    X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right = data
     train_fn, loss_fn, preds_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"]
     learning_rate = net_cfg["learning_rate"]
     bs = net_cfg["bs"]
@@ -580,29 +638,37 @@ def train(net_cfg,
         
         np.random.shuffle(train_idxs)
         X_train_left, X_train_right = X_train_left[train_idxs], X_train_right[train_idxs]
-        y_train = y_train[train_idxs]
+        y_train_left, y_train_right = y_train_left[train_idxs], y_train_right[train_idxs]
         
         # training loop
         this_train_losses = []
         t0 = time()
-        for X_train_batch_left, X_train_batch_right, y_train_batch in iterate(X_train_left, X_train_right, y_train, bs, augment, zmuv):
-            this_train_losses.append( train_fn(X_train_batch_left, X_train_batch_right, y_train_batch) )
+        for X_train_batch_left, X_train_batch_right, y_train_batch_left, y_train_batch_right in \
+                        iterate(X_train_left, X_train_right, y_train_left, y_train_right, bs, augment, zmuv):
+            this_train_losses.append( train_fn(X_train_batch_left, X_train_batch_right, y_train_batch_left, y_train_batch_right) )
         time_taken = time() - t0
         
         # validation loss loop
         this_valid_losses = []
-        for X_valid_batch_left, X_valid_batch_right, y_valid_batch in iterate(X_valid_left, X_valid_right, y_valid, bs, False, zmuv):
-            this_valid_losses.append( loss_fn(X_valid_batch_left, X_valid_batch_right, y_valid_batch) )
+        for X_valid_batch_left, X_valid_batch_right, y_valid_batch_left, y_valid_batch_right in\
+                        iterate(X_valid_left, X_valid_right, y_valid_left, y_valid_right, bs, False, zmuv):
+            this_valid_losses.append( loss_fn(X_valid_batch_left, X_valid_batch_right, y_valid_batch_left, y_valid_batch_right) )
         avg_valid_loss = np.mean(this_valid_losses)
         
         # validation accuracy loop
-        this_valid_preds = []
-        for X_valid_batch_left, X_valid_batch_right, _ in iterate(X_valid_left, X_valid_right, y_valid, bs, False, zmuv):
-            this_valid_preds += preds_fn(X_valid_batch_left, X_valid_batch_right).tolist()
-        valid_acc = np.mean( this_valid_preds == y_valid )
+        left_valid_preds = []
+        right_valid_preds = []
+                        
+        for X_valid_batch_left, X_valid_batch_right, _, _ in iterate(X_valid_left, X_valid_right, y_valid_left, y_valid_right, bs, False, zmuv):
+            left_preds, right_preds = preds_fn(X_valid_batch_left, X_valid_batch_right)
+            left_valid_preds += left_preds.tolist()
+            right_valid_preds += right_preds.tolist()
+        total_valid_preds = np.hstack((left_valid_preds, right_valid_preds))
+        total_valid_y = np.hstack((y_valid_left, y_valid_right))
+        valid_acc = np.mean(total_valid_preds == total_valid_y)
         
         # validation set kappa
-        valid_kappa = hp.weighted_kappa(human_rater=this_valid_preds, actual_rater=y_valid, num_classes=5)
+        valid_kappa = hp.weighted_kappa(human_rater=total_valid_preds, actual_rater=total_valid_y, num_classes=5)
         
         ## ------------ ##
         if f != None:
@@ -615,7 +681,7 @@ def train(net_cfg,
             print "%i,%f,%f,%f,%f,%f" % (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, time_taken)
             
         with open("models/%s.model.%i" % (os.path.basename(out_file),epoch+1), "wb") as g:
-            pickle.dump(get_all_param_values(l_out), g, pickle.HIGHEST_PROTOCOL) 
+            pickle.dump(get_all_param_values(l_out_pseudo), g, pickle.HIGHEST_PROTOCOL) 
             
     if f != None:
         f.close()
@@ -772,5 +838,19 @@ if "RESNET_ONLY_AUGMENT_64_ZMUV_L2" in os.environ:
         zmuv=True
     )
 
-    
+# -- fixed l2 bug and do left/right classes
+
+
+if "NEW_ONLY_AUGMENT_64_ZMUV_L2" in os.environ:
+    seed = 1
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(resnet_net, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4 })
+    train(
+        cfg,
+        num_epochs=1000,
+        data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+        out_file="output_quadrant/new_only_augment_b64_zmuv_l2.%i" % seed,
+        augment=True,
+        zmuv=True
+    )                        
     

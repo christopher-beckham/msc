@@ -1,0 +1,2 @@
+epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,time
+1,7.518855,2.681344,0.745874,0.003844,1601.681084
