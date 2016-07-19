@@ -1,0 +1,1 @@
+epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,valid_kappa_exp,time
