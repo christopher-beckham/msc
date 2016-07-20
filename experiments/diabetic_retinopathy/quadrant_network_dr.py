@@ -18,10 +18,11 @@ import helper as hp
 import matplotlib.pyplot as plt
 #import draw_net
 import numpy as np
-from skimage import io
+from skimage import io, img_as_float
 import cPickle as pickle
 import os
 from time import time
+from keras.preprocessing.image import ImageDataGenerator
 
 # In[3]:
 
@@ -79,9 +80,18 @@ def get_net(net_fn, args={}):
         loss = categorical_crossentropy(net_out_left, y_left).mean() + categorical_crossentropy(net_out_right, y_right).mean()
         loss_det = categorical_crossentropy(net_out_left_det, y_left).mean() + categorical_crossentropy(net_out_right_det, y_right).mean()
     else:
-        #loss = get_kappa_loss(5)(net_out, y).mean()
-        #loss_det = get_kappa_loss(5)(net_out_det, y).mean()
-        raise NotImplementedError()
+        if "hybrid_loss" not in args:
+            loss = hp.get_kappa_loss(5)(net_out_left, y_left).mean() + hp.get_kappa_loss(5)(net_out_right, y_right).mean()
+            loss_det = hp.get_kappa_loss(5)(net_out_left_det, y_left).mean() + hp.get_kappa_loss(5)(net_out_right_det, y_right).mean()
+        else:
+            hl = args["hybrid_loss"]
+            sys.stderr.write("hybrid loss factor: %f\n" % hl)
+            loss = categorical_crossentropy(net_out_left, y_left).mean() + categorical_crossentropy(net_out_right, y_right).mean() + \
+                   hl*hp.get_kappa_loss(5)(net_out_left, y_left).mean() + hl*hp.get_kappa_loss(5)(net_out_right, y_right).mean()
+            loss_det = categorical_crossentropy(net_out_left_det, y_left).mean() + categorical_crossentropy(net_out_right_det, y_right).mean() + \
+                       hl*hp.get_kappa_loss(5)(net_out_left_det, y_left).mean() + hl*hp.get_kappa_loss(5)(net_out_right_det, y_right).mean()
+            
+        #raise NotImplementedError()
     
     if "l2" in args:
         sys.stderr.write("adding l2: %f\n" % args["l2"])
@@ -104,20 +114,27 @@ def get_net(net_fn, args={}):
     bs = args["batch_size"]
     train_fn = theano.function(inputs=[X_left,X_right,y_left,y_right], outputs=loss, updates=updates)
     loss_fn = theano.function(inputs=[X_left,X_right,y_left,y_right], outputs=loss_det)
+
     preds_fn = theano.function(
         inputs=[X_left,X_right],
         outputs=[ T.argmax(net_out_left_det,axis=1), T.argmax(net_out_right_det,axis=1) ]
     )
+    dist_fn = theano.function(
+        inputs=[X_left, X_right],
+        outputs=[ net_out_left_det, net_out_right_det ]
+    )        
     
     return {
         "train_fn": train_fn,
         "loss_fn": loss_fn,
         "preds_fn": preds_fn,
+        "dist_fn": dist_fn,
         "l_out_left": l_out_left,
         "l_out_right": l_out_right,
         "l_out_pseudo": l_out_pseudo,
         "learning_rate": learning_rate,
-        "bs": bs
+        "bs": bs,
+        "kappa_loss": args["kappa_loss"]
     }
 
 
@@ -554,9 +571,105 @@ def resnet_net(args={}):
 
 
 
+
+
+
+
+
+def resnet_net_256(args={}):
+    
+    l_in_left = InputLayer( (None, 3, 256, 256) )
+    l_in_right = InputLayer( (None, 3, 256, 256) )
+
+    dd, conv_left = resnet(l_in_left, {}, True)
+    conv_right = resnet(l_in_right, dd, False)
+
+    for layer in get_all_layers(conv_left):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+
+    # left out
+    l_merge_left_sum = ElemwiseSumLayer([
+        conv_left,
+        conv_right
+    ])
+    l_out_left = DenseLayer(
+        l_merge_left_sum,
+        num_units=5,
+        nonlinearity=softmax,
+        W=HeNormal()
+    )
+
+    # right out
+    l_merge_right_sum = ElemwiseSumLayer([
+        conv_left,
+        conv_right
+    ])
+    l_out_right = DenseLayer(
+        l_merge_right_sum,
+        num_units=5,
+        nonlinearity=softmax,
+        W=HeNormal()
+    )
+
+    l_out_pseudo = ElemwiseSumLayer([l_out_left, l_out_right])
+
+    sys.stderr.write("number of params: %i\n" % count_params(l_out_pseudo))
+    
+    return {"l_out_pseudo": l_out_pseudo,
+            "l_out_left": l_out_left,
+            "l_out_right": l_out_right,
+            "l_in_left": l_in_left,
+            "l_in_right": l_in_right}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # In[11]:
 
-def iterate(X_arr_left, X_arr_right, y_arr_left, y_arr_right, bs, augment, zmuv):
+imgen = ImageDataGenerator(featurewise_center=False,
+    samplewise_center=False,
+    featurewise_std_normalization=False,
+    samplewise_std_normalization=False,
+    zca_whitening=False,
+    rotation_range=359.,
+    width_shift_range=0.05,
+    height_shift_range=0.05,
+    shear_range=0.,
+    zoom_range=0.02,
+    channel_shift_range=0.,
+    fill_mode='constant',
+    cval=0.5,
+    horizontal_flip=True,
+    vertical_flip=True,
+    rescale=None)
+
+
+def load_image_keras(filename):
+    img = io.imread(filename)
+    img = img_as_float(img)
+    img = np.asarray( [ img[...,0], img[...,1], img[...,2] ] ) # reshape
+    for i in range(0, img.shape[0]):
+        img[i, ...] = (img[i, ...] - np.mean(img[i, ...])) / np.std(img[i,...]) # zmuv
+    for xb, _ in imgen.flow( np.asarray([img], dtype=img.dtype), np.asarray([0], dtype="int32")):
+        break
+    return xb[0]
+    
+
+def iterate(X_arr_left, X_arr_right, y_arr_left, y_arr_right, bs, augment, zmuv, keras=False):
     assert X_arr_left.shape[0] == X_arr_right.shape[0] == y_arr_left.shape[0] == y_arr_right.shape[0]
     b = 0
     DATA_DIR = os.environ["DATA_DIR"]
@@ -565,11 +678,17 @@ def iterate(X_arr_left, X_arr_right, y_arr_left, y_arr_right, bs, augment, zmuv)
             break
         this_X_left, this_X_right, this_y_left, this_y_right = \
                         X_arr_left[b*bs:(b+1)*bs], X_arr_right[b*bs:(b+1)*bs], y_arr_left[b*bs:(b+1)*bs], y_arr_right[b*bs:(b+1)*bs]
-        # load the images
-        images_for_this_X_left = [ hp.load_image_fast("%s/%s.jpeg" % (DATA_DIR,filename), augment=augment, zmuv=zmuv) for filename in this_X_left ]
+
+        if not keras:
+            images_for_this_X_left = [ hp.load_image_fast("%s/%s.jpeg" % (DATA_DIR,filename), augment=augment, zmuv=zmuv) for filename in this_X_left ]
+        else:
+            images_for_this_X_left = [ load_image_keras("%s/%s.jpeg" % (DATA_DIR,filename) ) for filename in this_X_left ]
         images_for_this_X_left = np.asarray(images_for_this_X_left, dtype="float32")
-        
-        images_for_this_X_right = [ hp.load_image_fast("%s/%s.jpeg" % (DATA_DIR,filename), augment=augment, zmuv=zmuv) for filename in this_X_right ]
+
+        if not keras:
+            images_for_this_X_right = [ hp.load_image_fast("%s/%s.jpeg" % (DATA_DIR,filename), augment=augment, zmuv=zmuv) for filename in this_X_right ]
+        else:
+            images_for_this_X_right = [ load_image_keras("%s/%s.jpeg" % (DATA_DIR,filename) ) for filename in this_X_right ]
         images_for_this_X_right = np.asarray(images_for_this_X_right, dtype="float32")
 
         #print images_for_this_X_right.shape
@@ -586,7 +705,7 @@ def iterate(X_arr_left, X_arr_right, y_arr_left, y_arr_right, bs, augment, zmuv)
         # ---
         b += 1
 
-
+        
 # In[19]:
 
 def train(net_cfg, 
@@ -598,6 +717,7 @@ def train(net_cfg,
           resume=None,
           augment=True,
           zmuv=False,
+          keras=False,
           schedule={}):
     # prepare the out_file
     l_out_left = net_cfg["l_out_left"]
@@ -608,9 +728,9 @@ def train(net_cfg,
     if resume == None:
         if out_file != None:
             f = open("%s.txt" % out_file, "wb")
-            f.write("epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,time\n")
+            f.write("epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,valid_kappa_exp,time\n")
         if print_out:
-            print "epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,time"
+            print "epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,valid_kappa_exp,time"
     else:
         sys.stderr.write("resuming training...\n")
         if out_file != None:
@@ -621,7 +741,7 @@ def train(net_cfg,
     #draw_net.draw_to_file( get_all_layers(l_out), "%s.png" % out_file, verbose=True)
     # extract functions
     X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right = data
-    train_fn, loss_fn, preds_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"]
+    train_fn, loss_fn, preds_fn, dist_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"], net_cfg["dist_fn"]
     learning_rate = net_cfg["learning_rate"]
     bs = net_cfg["bs"]
     
@@ -644,41 +764,58 @@ def train(net_cfg,
         this_train_losses = []
         t0 = time()
         for X_train_batch_left, X_train_batch_right, y_train_batch_left, y_train_batch_right in \
-                        iterate(X_train_left, X_train_right, y_train_left, y_train_right, bs, augment, zmuv):
+                        iterate(X_train_left, X_train_right, y_train_left, y_train_right, bs, augment, zmuv, keras):
             this_train_losses.append( train_fn(X_train_batch_left, X_train_batch_right, y_train_batch_left, y_train_batch_right) )
         time_taken = time() - t0
         
         # validation loss loop
         this_valid_losses = []
         for X_valid_batch_left, X_valid_batch_right, y_valid_batch_left, y_valid_batch_right in\
-                        iterate(X_valid_left, X_valid_right, y_valid_left, y_valid_right, bs, False, zmuv):
+                        iterate(X_valid_left, X_valid_right, y_valid_left, y_valid_right, bs, False, zmuv, keras):
             this_valid_losses.append( loss_fn(X_valid_batch_left, X_valid_batch_right, y_valid_batch_left, y_valid_batch_right) )
         avg_valid_loss = np.mean(this_valid_losses)
         
         # validation accuracy loop
         left_valid_preds = []
         right_valid_preds = []
-                        
-        for X_valid_batch_left, X_valid_batch_right, _, _ in iterate(X_valid_left, X_valid_right, y_valid_left, y_valid_right, bs, False, zmuv):
+
+        left_valid_preds_exp = []
+        right_valid_preds_exp = []
+        
+        for X_valid_batch_left, X_valid_batch_right, _, _ in iterate(X_valid_left, X_valid_right, y_valid_left, y_valid_right, bs, False, zmuv, keras):
+            # just do argmax to get the predictions for valid_kappa
             left_preds, right_preds = preds_fn(X_valid_batch_left, X_valid_batch_right)
             left_valid_preds += left_preds.tolist()
             right_valid_preds += right_preds.tolist()
+
+            # compute the valid_kappa_exp
+            left_dist, right_dist = dist_fn(X_valid_batch_left, X_valid_batch_right)
+            for dist in left_dist:
+                left_valid_preds_exp.append( int(np.round(np.dot(dist, np.arange(0,5)))) )
+            for dist in right_dist:
+                right_valid_preds_exp.append( int(np.round(np.dot(dist, np.arange(0,5)))) )
+            
+            
         total_valid_preds = np.hstack((left_valid_preds, right_valid_preds))
         total_valid_y = np.hstack((y_valid_left, y_valid_right))
         valid_acc = np.mean(total_valid_preds == total_valid_y)
+
+        total_valid_exp_preds = np.hstack((left_valid_preds_exp, right_valid_preds_exp))
         
         # validation set kappa
         valid_kappa = hp.weighted_kappa(human_rater=total_valid_preds, actual_rater=total_valid_y, num_classes=5)
+
+        valid_kappa_exp = hp.weighted_kappa(human_rater=total_valid_exp_preds, actual_rater=total_valid_y, num_classes=5)
         
         ## ------------ ##
         if f != None:
             f.write(
-                "%i,%f,%f,%f,%f,%f\n" %
-                    (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, time_taken) 
+                "%i,%f,%f,%f,%f,%f,%f\n" %
+                    (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, time_taken) 
             )
             f.flush()
         if print_out:
-            print "%i,%f,%f,%f,%f,%f" % (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, time_taken)
+            print "%i,%f,%f,%f,%f,%f,%f" % (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, time_taken)
             
         with open("models/%s.model.%i" % (os.path.basename(out_file),epoch+1), "wb") as g:
             pickle.dump(get_all_param_values(l_out_pseudo), g, pickle.HIGHEST_PROTOCOL) 
@@ -853,4 +990,151 @@ if "NEW_ONLY_AUGMENT_64_ZMUV_L2" in os.environ:
         augment=True,
         zmuv=True
     )                        
+
+
+if "TEST_LR" in os.environ:
+    seed = 1
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(resnet_net, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "learning_rate":0.1 })
+    train(
+        cfg,
+        num_epochs=1000,
+        data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+        out_file="output_quadrant/new_only_augment_b64_zmuv_l2_lr0.1.%i" % seed,
+        augment=True,
+        zmuv=True
+    )                        
+
+
+
     
+
+if "RESUME_LLR" in os.environ:
+    seed = 1
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(resnet_net, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "learning_rate":0.001  })
+    train(
+        cfg,
+        num_epochs=1000,
+        data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+        out_file="output_quadrant/new_only_augment_b64_zmuv_l2_llr.%i" % seed,
+        augment=True,
+        zmuv=True,
+        resume="models/new_only_augment_b64_zmuv_l2.1.model.56.bak"
+    )
+
+# when i added this in i modified load_image_fast to also do horizontal flipping
+if "RESUME_MORE_AUGMENT" in os.environ:
+    seed = 1
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(resnet_net, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4 })
+    train(
+        cfg,
+        num_epochs=1000,
+        data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+        out_file="output_quadrant/new_only_augment_b64_zmuv_l2_more-aug.%i" % seed,
+        augment=True,
+        zmuv=True,
+        resume="models/new_only_augment_b64_zmuv_l2.1.model.56.bak"
+    )
+
+# try experimenting with keras' data augmentation
+# - is it faster?
+# - added shift width/height augment
+# - added slight zoom augment
+# - vertical + horizontal flipping (in addition to rotation which we already have)
+if "RESUME_KERAS_AUGMENT" in os.environ:
+    seed = 1
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(resnet_net, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4 })
+    train(
+        cfg,
+        num_epochs=1000,
+        data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+        out_file="output_quadrant/new_only_augment_b64_zmuv_l2_keras-aug.%i" % seed,
+        augment=True,
+        zmuv=True,
+        keras=True,
+        resume="models/new_only_augment_b64_zmuv_l2.1.model.56.bak"
+    )
+
+
+if "LOW_RES" in os.environ:
+    seed = 1
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4 })
+    train(
+        cfg,
+        num_epochs=1000,
+        data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+        out_file="output_quadrant/low_res.%i" % seed,
+        augment=True,
+        zmuv=True,
+        keras=True
+    )
+
+# this has really slow convergence and doesn't boost the valid kappa
+# so let's try a hybrid loss function
+if "LOW_RES_KAPPA" in os.environ:
+    seed = 1
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(resnet_net_256, { "kappa_loss": True, "batch_size": 64, "l2": 1e-4 })
+    train(
+        cfg,
+        num_epochs=1000,
+        data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+        out_file="output_quadrant/low_res_kappa.%i" % seed,
+        augment=True,
+        zmuv=True,
+        keras=True
+    )
+
+
+if "LOW_RES_KAPPA_HYBRID_01" in os.environ:
+    seed = 1
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(resnet_net_256, { "kappa_loss": True, "hybrid_loss":0.01, "batch_size": 64, "l2": 1e-4 })
+    train(
+        cfg,
+        num_epochs=1000,
+        data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+        out_file="output_quadrant/low_res_kappa_hybrid_01.%i" % seed,
+        augment=True,
+        zmuv=True,
+        keras=True
+    )
+
+
+if "LOW_RES_KAPPA_HYBRID_001" in os.environ:
+    seed = 1
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(resnet_net_256, { "kappa_loss": True, "hybrid_loss":0.001, "batch_size": 64, "l2": 1e-4 })
+    train(
+        cfg,
+        num_epochs=1000,
+        data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+        out_file="output_quadrant/low_res_kappa_hybrid_001.%i" % seed,
+        augment=True,
+        zmuv=True,
+        keras=True
+    )
+
+    
+
+    
+# ----
+
+
+
+if "NEW_ONLY_AUGMENT_64_ZMUV_L2_KAPPA" in os.environ:
+    seed = 1
+    lasagne.random.set_rng( np.random.RandomState(seed) )
+    cfg = get_net(resnet_net, { "kappa_loss": True, "batch_size": 64, "l2": 1e-4, "learning_rate": 0.1 })
+    train(
+        cfg,
+        num_epochs=1000,
+        data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+        out_file="output_quadrant/new_only_augment_b64_zmuv_l2_kappa.%i" % seed,
+        augment=True,
+        zmuv=True
+    )                        
