@@ -145,6 +145,84 @@ def get_net(net_fn, args={}):
     }
 
 
+
+def get_net_baseline(net_fn, args={}):
+    # ----
+    X = T.tensor4('X')
+    y = T.ivector('y')
+    # ----
+    
+    cfg = net_fn(args)
+    l_out = cfg["l_out"]
+    l_in = cfg["l_in"]
+                        
+    net_out = get_output(
+        l_out,
+        {l_in: X}
+    )
+    net_out_det = get_output(
+        l_out,
+        {l_in: X},
+        deterministic=True
+    )
+    
+    loss = categorical_crossentropy(net_out, y).mean()
+    loss_det = categorical_crossentropy(net_out_det, y).mean()
+    
+    if "l2" in args:
+        sys.stderr.write("adding l2: %f\n" % args["l2"])
+        loss += args["l2"]*regularize_network_params(l_out, l2)
+        loss_det += args["l2"]*regularize_network_params(l_out, l2)
+    params = get_all_params(l_out, trainable=True)
+    sys.stderr.write("params: %s\n" % str(params))
+    if "max_norm" in args:
+        grads = total_norm_constraint( T.grad(loss, params), max_norm=args["max_norm"])
+    else:
+        grads = T.grad(loss, params)
+    learning_rate = theano.shared(floatX(0.01)) if "learning_rate" not in args else theano.shared(floatX(args["learning_rate"]))
+    momentum = 0.9 if "momentum" not in args else args["momentum"]
+    if "rmsprop" in args:
+        sys.stderr.write("using rmsprop instead of nesterov momentum...\n")
+        updates = rmsprop(grads, params, learning_rate=learning_rate)
+    else:
+        updates = nesterov_momentum(grads, params, learning_rate=learning_rate, momentum=momentum)
+    # index fns
+    bs = args["batch_size"]
+    train_fn = theano.function(inputs=[X,y], outputs=loss, updates=updates)
+    loss_fn = theano.function(inputs=[X,y], outputs=loss_det)
+
+    preds_fn = theano.function(
+        inputs=[X],
+        outputs=T.argmax(net_out_det,axis=1)
+    )
+    dist_fn = theano.function(
+        inputs=[X],
+        outputs=net_out_det
+    )
+    dist_fn_nondet = theano.function(
+        inputs=[X],
+        outputs=[net_out]
+    )
+    
+    return {
+        "train_fn": train_fn,
+        "loss_fn": loss_fn,
+        "preds_fn": preds_fn,
+        "dist_fn": dist_fn,
+        "dist_fn_nondet": dist_fn_nondet,
+        "l_out": l_out,
+        "learning_rate": learning_rate,
+        "bs": bs,
+        "kappa_loss": args["kappa_loss"]
+    }
+
+
+
+
+
+
+
+
 # In[24]:
 
 def net(args={}):
@@ -429,7 +507,7 @@ def residual_block(layer, n_out_channels, prefix, stride=1, dd={}, nonlinearity=
     return NonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=nonlinearity)
 
 
-def resnet(quadrant, dd, first_time, nf=[32, 64, 128, 256], dropout_p=None):
+def resnet(quadrant, dd, first_time, nf=[32, 64, 128, 256], N=2, dropout_p=None):
     # 34-layer resnet as per:
     # https://arxiv.org/pdf/1512.03385v1.pdf
     layer = Conv2DLayer(quadrant, 
@@ -444,22 +522,22 @@ def resnet(quadrant, dd, first_time, nf=[32, 64, 128, 256], dropout_p=None):
         dd["conv1"] = layer
         print "conv1"
     layer = MaxPool2DLayer(layer, pool_size=3, stride=2)
-    for i in range(2):
+    for i in range(N):
         layer = residual_block(layer, nf[0], prefix="a%i" % i, dd=dd)
         if dropout_p != None:
             layer = DropoutLayer(layer, p=dropout_p)
     layer = residual_block(layer, nf[1], prefix="aa", stride=2, dd=dd)
-    for i in range(2):
+    for i in range(N):
         layer = residual_block(layer, nf[1], prefix="b%i" % i, dd=dd)
         if dropout_p != None:
             layer = DropoutLayer(layer, p=dropout_p)
     layer = residual_block(layer, nf[2], prefix="bb%", stride=2, dd=dd)
-    for i in range(2):
+    for i in range(N):
         layer = residual_block(layer, nf[2], prefix="c%i" % i, dd=dd)
         if dropout_p != None:
             layer = DropoutLayer(layer, p=dropout_p)
     layer = residual_block(layer, nf[3], prefix="cc", stride=2, dd=dd)
-    for i in range(2):
+    for i in range(N):
         layer = residual_block(layer, nf[3], prefix="dd%i" % i, dd=dd)
         if dropout_p != None:
             layer = DropoutLayer(layer, p=dropout_p)
@@ -501,15 +579,15 @@ def resnet_net(args={}):
     l_topright_right = SliceLayer( SliceLayer(l_in_right, indices=slice(0,256), axis=2), indices=slice(256,512), axis=3 )
     l_bottomright_right = SliceLayer( SliceLayer(l_in_right, indices=slice(256,512), axis=2), indices=slice(256,512), axis=3 ) 
 
-    dd, topleft_conv_left = resnet(l_topleft_left, {}, True, dropout_p=dropout_p)
-    bottomleft_conv_left = resnet(l_bottomleft_left, dd, False, dropout_p=dropout_p)
-    topright_conv_left = resnet(l_topright_left, dd, False, dropout_p=dropout_p)
-    bottomright_conv_left = resnet(l_bottomright_left, dd, False, dropout_p=dropout_p)
+    dd, topleft_conv_left = resnet(l_topleft_left, {}, True, dropout_p=dropout_p, N=args["N"])
+    bottomleft_conv_left = resnet(l_bottomleft_left, dd, False, dropout_p=dropout_p, N=args["N"])
+    topright_conv_left = resnet(l_topright_left, dd, False, dropout_p=dropout_p, N=args["N"])
+    bottomright_conv_left = resnet(l_bottomright_left, dd, False, dropout_p=dropout_p, N=args["N"])
 
-    topleft_conv_right = resnet(l_topleft_right, dd, False, dropout_p=dropout_p)
-    bottomleft_conv_right = resnet(l_bottomleft_right, dd, False, dropout_p=dropout_p)
-    topright_conv_right = resnet(l_topright_right, dd, False, dropout_p=dropout_p)
-    bottomright_conv_right = resnet(l_bottomright_right, dd, False, dropout_p=dropout_p)
+    topleft_conv_right = resnet(l_topleft_right, dd, False, dropout_p=dropout_p, N=args["N"])
+    bottomleft_conv_right = resnet(l_bottomleft_right, dd, False, dropout_p=dropout_p, N=args["N"])
+    topright_conv_right = resnet(l_topright_right, dd, False, dropout_p=dropout_p, N=args["N"])
+    bottomright_conv_right = resnet(l_bottomright_right, dd, False, dropout_p=dropout_p, N=args["N"])
 
     for layer in get_all_layers(topleft_conv_left):
         sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
@@ -732,6 +810,30 @@ def resnet_net_beefier(args={}):
 
 
 
+def resnet_net_256_baseline(args={}):
+    
+    l_in = InputLayer( (None, 3, 256, 256) )
+
+    dd, conv = resnet(l_in, {}, True, N=args["N"], dropout_p=args["dropout_p"] if "dropout_p" in args else None)
+
+    if "end_dropout" in args:
+        sys.stderr.write("adding end dropout: %f\n" % args["end_dropout"])
+        conv = DropoutLayer(conv, p=args["end_dropout"])
+    
+    for layer in get_all_layers(conv):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+
+
+    l_out = DenseLayer(
+        conv,
+        num_units=5,
+        nonlinearity=softmax,
+        W=HeNormal()
+    )
+    
+    return {"l_out": l_out,
+            "l_in": l_in}
+
 
 
 
@@ -747,8 +849,8 @@ def resnet_net_256(args={}):
     l_in_left = InputLayer( (None, 3, 256, 256) )
     l_in_right = InputLayer( (None, 3, 256, 256) )
 
-    dd, conv_left = resnet(l_in_left, {}, True)
-    conv_right = resnet(l_in_right, dd, False)
+    dd, conv_left = resnet(l_in_left, {}, True, N=args["N"], dropout_p=args["dropout_p"] if "dropout_p" in args else None)
+    conv_right = resnet(l_in_right, dd, False, N=args["N"], dropout_p=args["dropout_p"] if "dropout_p" in args else None)
 
     if "end_dropout" in args:
         sys.stderr.write("adding end dropout: %f\n" % args["end_dropout"])
@@ -925,6 +1027,34 @@ def load_image_keras(filename):
     return xb[0]
     
 
+
+
+def iterate_baseline(X_arr, y_arr, bs, augment, zmuv, keras=False, DATA_DIR=os.environ["DATA_DIR"]):
+    assert X_arr.shape[0] == y_arr.shape[0]
+    b = 0
+    #DATA_DIR = os.environ["DATA_DIR"]
+    while True:
+        if b*bs >= X_arr.shape[0]:
+            break
+        this_X, this_y = X_arr[b*bs:(b+1)*bs], y_arr[b*bs:(b+1)*bs]
+
+        if not keras:
+            images_for_this_X = [ hp.load_image_fast("%s/%s.jpeg" % (DATA_DIR,filename), augment=augment, zmuv=zmuv) for filename in this_X ]
+        else:
+            images_for_this_X = [ load_image_keras("%s/%s.jpeg" % (DATA_DIR,filename) ) for filename in this_X ]
+        images_for_this_X = np.asarray(images_for_this_X, dtype="float32")
+
+        yield images_for_this_X, this_y
+        
+        # ---
+        b += 1
+
+
+
+
+
+
+
 def iterate(X_arr_left, X_arr_right, y_arr_left, y_arr_right, bs, augment, zmuv, keras=False, DATA_DIR=os.environ["DATA_DIR"]):
     assert X_arr_left.shape[0] == X_arr_right.shape[0] == y_arr_left.shape[0] == y_arr_right.shape[0]
     b = 0
@@ -960,6 +1090,141 @@ def iterate(X_arr_left, X_arr_right, y_arr_left, y_arr_right, bs, augment, zmuv,
         
         # ---
         b += 1
+
+
+
+
+def train_baseline(net_cfg, 
+          num_epochs,
+          data,
+          out_file=None,
+          print_out=True,
+          debug=False,
+          resume=None,
+          augment=True,
+          zmuv=False,
+          keras=False,
+          schedule={}):
+    # prepare the out_file
+    l_out = net_cfg["l_out"]
+    
+    f = None
+    if resume == None:
+        if out_file != None:
+            f = open("%s.txt" % out_file, "wb")
+            f.write("epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,valid_kappa_exp,time\n")
+        if print_out:
+            print "epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,valid_kappa_exp,time"
+    else:
+        sys.stderr.write("resuming training...\n")
+        if out_file != None:
+            f = open("%s.txt" % out_file, "ab")
+        with open(resume) as g:
+            set_all_param_values(l_out, pickle.load(g))
+
+        
+            
+    # extract functions
+    X_train, y_train, X_valid, y_valid = data
+    train_fn, loss_fn, preds_fn, dist_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"], net_cfg["dist_fn"]
+    learning_rate = net_cfg["learning_rate"]
+    bs = net_cfg["bs"]
+    
+    # training
+    train_idxs = [x for x in range(0, X_train.shape[0])]
+    
+    if debug:
+        sys.stderr.write("idxs: %s\n" % train_idxs)
+    for epoch in range(0, num_epochs):
+        
+        if epoch+1 in schedule:
+            sys.stderr.write("changing learning rate to: %f" % schedule[epoch+1])
+            learning_rate.set_value( floatX(schedule[epoch+1]) )
+        
+        np.random.shuffle(train_idxs)
+        X_train = X_train[train_idxs]
+        y_train = y_train[train_idxs]
+        
+        # training loop
+        this_train_losses = []
+        t0 = time()
+        for X_train_batch, y_train_batch in iterate_baseline(X_train, y_train, bs, augment, zmuv, keras):
+            this_train_losses.append( train_fn(X_train_batch, y_train_batch) )
+        time_taken = time() - t0
+        
+        # validation loss loop
+        this_valid_losses = []
+        for X_valid_batch, y_valid_batch, in iterate_baseline(X_valid, y_valid, bs, False, zmuv, keras):
+            this_valid_losses.append( loss_fn(X_valid_batch, y_valid_batch) )
+        avg_valid_loss = np.mean(this_valid_losses)
+        
+        # validation accuracy loop
+        valid_preds = []
+        valid_preds_exp = []
+        
+        for X_valid_batch, _ in iterate_baseline(X_valid, y_valid, bs, False, zmuv, keras):
+            # just do argmax to get the predictions for valid_kappa
+            preds = preds_fn(X_valid_batch).tolist()
+            valid_preds += preds
+
+            # compute the valid_kappa_exp
+            dists = dist_fn(X_valid_batch)
+            for dist in dists:
+                valid_preds_exp.append( int(np.round(np.dot(dist, np.arange(0,5)))) )
+            
+        valid_acc = np.mean(valid_preds == y_valid)
+        
+        # validation set kappa
+        valid_kappa = hp.weighted_kappa(human_rater=valid_preds, actual_rater=y_valid, num_classes=5)
+
+        valid_kappa_exp = hp.weighted_kappa(human_rater=valid_preds_exp, actual_rater=y_valid, num_classes=5)
+        
+        ## ------------ ##
+        if f != None:
+            f.write(
+                "%i,%f,%f,%f,%f,%f,%f\n" %
+                    (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, time_taken) 
+            )
+            f.flush()
+        if print_out:
+            print "%i,%f,%f,%f,%f,%f,%f" % (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, time_taken)
+            
+        with open("models/%s.model.%i" % (os.path.basename(out_file),epoch+1), "wb") as g:
+            pickle.dump(get_all_param_values(l_out), g, pickle.HIGHEST_PROTOCOL) 
+            
+    if f != None:
+        f.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         
 # In[19]:
@@ -1430,6 +1695,39 @@ if __name__ == "__main__":
         )
 
 
+
+    if "SLIM_512_N4" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":True, "end_dropout":0.5, "N":4 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/slim_512_n4.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+
+
+
+
+
+
+
+
+        
+
     # ----------
 
     if "RESNET_BEEFY" in os.environ:
@@ -1455,6 +1753,80 @@ if __name__ == "__main__":
             keras=True
         )
 
+
+    if "RESNET_BEEFY_FULL" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_beefier, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":True, "end_dropout":0.5 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs]
+        X_train_right = X_right[idxs]
+        y_train_left = y_left[idxs]
+        y_train_right = y_right[idxs]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/resnet-beefy_absorb_fsm_d0.5_full.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True,
+            resume="models/resnet-beefy_absorb_fsm_d0.5.1.model.245.bak"
+        )
+
+
+    if "RESNET_BEEFY_DFSM" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_beefier, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":False, "end_dropout":0.5 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/resnet-beefy_absorb_fsm_d0.5_dfsm.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True,
+            resume="models/resnet-beefy_absorb_fsm_d0.5.1.model.245.bak.dfsm"
+        )
+
+
+    if "RESNET_BEEFY_DFSM_SWITCH_HYBRID_LOSS" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_beefier, { "kappa_loss": True, "hybrid_loss":1e-4, "batch_size": 64, "l2": 1e-4, "fix_softmax":False, "end_dropout":0.5 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/resnet-beefy_absorb_fsm_d0.5_dfsm_hl.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True,
+            resume="models/resnet-beefy_absorb_fsm_d0.5.1.model.245.bak.dfsm"
+        )
 
 
 
@@ -1542,6 +1914,168 @@ if __name__ == "__main__":
         )
 
 
+    if "LOW_RES_ABSORB_FSM_N4" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":True, "N":4 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_fsm_n4.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+
+    if "LOW_RES_ABSORB_DFSM_N4" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":False, "N":4 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_dfsm_n4.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+
+
+
+        
+
+    if "LOW_RES_ABSORB_FSM_N4_LEAKY" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":True, "N":4 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_fsm_n4.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+
+
+        
+
+    if "LOW_RES_ABSORB_FSM_N6" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":True, "N":6 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_fsm_n6.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+
+
+    if "LOW_RES_ABSORB_DFSM_N6" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":False, "N":6 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_dfsm_n6.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+
+
+
+        
+
+    if "LOW_RES_N4_BASELINE" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_256_baseline, { "kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":4 })
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n4_baseline.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+
+
+
+
+
+
+
+
+        
 
 
     if "LOW_RES_FSM_BEEFIER" in os.environ:
@@ -1677,6 +2211,89 @@ if __name__ == "__main__":
             keras=True
         )
 
+
+    if "LOW_RES_DROPOUT_FSM_5PVALID" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "end_dropout":0.5, "fix_softmax":True })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_d0.5_fsm_5pv.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+
+
+
+
+
+
+
+        
+
+    if "LOW_RES_DROPOUT_FSM_MOREL2" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-3, "end_dropout":0.5, "fix_softmax":True })
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_d0.5_fsm_l2-1e-3.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+
+
+        
+
+    if "LOW_RES_DROPOUT_FSM_DROPOUTP1" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "end_dropout":0.5, "fix_softmax":True, "dropout_p": 0.1 })
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_d0.5_fsm_dropoutp0.1.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True,
+            resume="models/low_res_d0.5_fsm.1.model.201.bak"
+        )
+
+    if "LOW_RES_DROPOUT_FSM_DROPOUTP2" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "end_dropout":0.5, "fix_softmax":True, "dropout_p": 0.2 })
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_d0.5_fsm_dropoutp0.2.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True,
+            resume="models/low_res_d0.5_fsm.1.model.201.bak"
+        )
+
+
+
+
+        
 
     # this has really slow convergence and doesn't boost the valid kappa
     # so let's try a hybrid loss function
