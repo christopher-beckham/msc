@@ -51,7 +51,108 @@ y_valid_right = y_right[idxs][int(0.9*y_right.shape[0]) ::]
 
 # -----
 
-# In[9]:
+class SimpleOrdinalSubtractLayer(Layer):
+    def __init__(self, incoming, **kwargs):
+        super(SimpleOrdinalSubtractLayer, self).__init__(incoming, **kwargs)
+        num_inputs = int(np.prod(self.input_shape[1:]))
+        self.num_inputs = num_inputs
+        # construct the matrix
+        self.W = np.zeros((num_inputs, num_inputs), dtype="float32")
+        self.W[0,0]=1
+        for k in range(1, num_inputs):
+            self.W[k-1,k] = -1
+            self.W[k,k] = 1
+        print self.W
+
+    def get_output_shape_for(self, input_shape):
+        return (input_shape[0], self.num_inputs)
+
+    def get_output_for(self, input, **kwargs):
+        if input.ndim > 2:
+            # if the input has more than two dimensions, flatten it into a
+            # batch of feature vectors.
+            input = input.flatten(2)
+
+        result = T.dot(input, self.W)
+        return result
+
+
+
+class DivisionLayer(Layer):
+    def __init__(self, incoming, **kwargs):
+        super(DivisionLayer, self).__init__(incoming, **kwargs)
+        num_inputs = int(np.prod(self.input_shape[1:]))
+        self.num_inputs = num_inputs
+
+    def get_output_shape_for(self, input_shape):
+        return (input_shape[0], self.num_inputs)
+
+    def get_output_for(self, input, **kwargs):
+        if input.ndim > 2:
+            # if the input has more than two dimensions, flatten it into a
+            # batch of feature vectors.
+            input = input.flatten(2)
+            
+        result = input
+        last_col = T.addbroadcast(result[:,-1::], 1)
+            
+        return result / last_col
+
+    
+class UpperRightOnesLayer(Layer):
+    def __init__(self, incoming, **kwargs):
+        super(UpperRightOnesLayer, self).__init__(incoming, **kwargs)
+        num_inputs = int(np.prod(self.input_shape[1:]))
+        self.num_inputs = num_inputs
+        # construct the upper triangular matrix
+        self.W = np.ones((num_inputs, num_inputs), dtype="float32")
+        for k in range(0, num_inputs):
+            self.W[k][0:k] = 0
+
+    def get_output_shape_for(self, input_shape):
+        return (input_shape[0], self.num_inputs)
+
+    def get_output_for(self, input, **kwargs):
+        if input.ndim > 2:
+            # if the input has more than two dimensions, flatten it into a
+            # batch of feature vectors.
+            input = input.flatten(2)
+
+        result = T.dot(input, self.W)
+        return result
+
+class OrdinalSubtractLayer(Layer):
+    def __init__(self, incoming, **kwargs):
+        super(OrdinalSubtractLayer, self).__init__(incoming, **kwargs)
+        num_inputs = int(np.prod(self.input_shape[1:]))
+        self.num_inputs = num_inputs
+        # construct the matrix
+        self.W = np.zeros((num_inputs, num_inputs+1), dtype="float32")
+        self.W[0,0]=1
+        for k in range(1, num_inputs):
+            self.W[k-1,k] = -1
+            self.W[k,k] = 1
+        self.W[num_inputs-1,num_inputs] = 1
+        # construct the bias row vector
+        self.b = np.zeros((1, num_inputs+1), dtype="float32")
+        self.b[0, num_inputs] = 1
+        print self.W
+        print self.b
+
+    def get_output_shape_for(self, input_shape):
+        return (input_shape[0], self.num_inputs+1)
+
+    def get_output_for(self, input, **kwargs):
+        if input.ndim > 2:
+            # if the input has more than two dimensions, flatten it into a
+            # batch of feature vectors.
+            input = input.flatten(2)
+
+        result = T.dot(input, self.W)
+        result = T.abs_(self.b - result)
+        #eps = 0.01
+        #result = result + eps
+        return result
 
 def get_net(net_fn, args={}):
     # ----
@@ -144,42 +245,87 @@ def get_net(net_fn, args={}):
         "kappa_loss": args["kappa_loss"]
     }
 
-
+def sigm_scaled(x):
+    k = 5 # 5 classes
+    return sigmoid(x)*(k-1)
 
 def get_net_baseline(net_fn, args={}):
-    # ----
+    
     X = T.tensor4('X')
     y = T.ivector('y')
-    # ----
+    y_ord = T.fmatrix('y_ord')
+    w = T.fmatrix('w')
     
     cfg = net_fn(args)
     l_out = cfg["l_out"]
     l_in = cfg["l_in"]
-                        
-    net_out = get_output(
-        l_out,
-        {l_in: X}
-    )
-    net_out_det = get_output(
-        l_out,
-        {l_in: X},
-        deterministic=True
-    )
+
+    l_exp = DenseLayer(l_out, num_units=1, nonlinearity=linear)
+    if "learn_end" not in args:
+        l_exp.W.set_value(np.asarray([[0.],[1.],[2.],[3.],[4.]], dtype="float32"))
     
-    loss = categorical_crossentropy(net_out, y).mean()
+    params = get_all_params(l_out, trainable=True)
+    if "learn_end" in args:
+        sys.stderr.write("learning W matrix of l_exp\n")
+        params += [l_exp.W]
+        mode = args["learn_end"]
+        assert mode in ["linear", "sigm_scaled"]
+        if mode == "sigm_scaled":
+            sys.stderr.write("using sigm_scaled at the end instead of linear\n")
+            l_exp = NonlinearityLayer(l_exp, nonlinearity=sigm_scaled)
+
+
+    net_out, exp_out = get_output([l_out,l_exp], {l_in: X})
+    net_out_det, exp_out_det = get_output([l_out,l_exp], {l_in: X}, deterministic=True)
+
+    tmp_out = get_output(l_exp, {l_in: X})
+
+    if "learn_end" not in args:    
+        loss = categorical_crossentropy(net_out, y).mean()
+    else:
+        sys.stderr.write("using squared_error for learn_end\n")
+        loss = squared_error(exp_out, y.dimshuffle(0,'x')).mean()
+
     loss_det = categorical_crossentropy(net_out_det, y).mean()
+
+    # total kappa loss using the expectation trick
+    if "klo" in args:
+        loss = hp.get_kappa_loss(5)(net_out, y).mean()
+        #loss_det = hp.get_kappa_loss(5)(net_out_det, y).mean()
+        sys.stderr.write("using total kappa loss\n")
+        # for validation set we want to evaluate the
+        # cross-entropy still
     
     if "l2" in args:
         sys.stderr.write("adding l2: %f\n" % args["l2"])
         loss += args["l2"]*regularize_network_params(l_out, l2)
         loss_det += args["l2"]*regularize_network_params(l_out, l2)
-    params = get_all_params(l_out, trainable=True)
+        
+    # expectation trick as a regulariser
+    if "kl" in args:
+        kl = args["kl"]
+        sys.stderr.write("hybrid loss factor: %f\n" % kl)
+        loss += kl*hp.get_kappa_loss(5)(net_out, y).mean()
+        # DO NOT evaluate the extra reg term
+        # for the validation set.
+        #loss_det += kl*hp.get_kappa_loss(5)(net_out_det, y).mean()
+
+    # pseudo cross-entropy trick
+    if "ordinal_xent" in args:
+        sys.stderr.write("ordinal xent lambda term: %f\n" % args["ordinal_xent"])
+        eps=1e-6
+        loss += ( args["ordinal_xent"] / ( 1 + categorical_crossentropy(net_out+eps, w).mean() ) )
+        # DO NOT evaluate the extra reg term
+        # for the validation set.
+        
+    #params = get_all_params(l_out, trainable=True)
     sys.stderr.write("params: %s\n" % str(params))
     if "max_norm" in args:
         grads = total_norm_constraint( T.grad(loss, params), max_norm=args["max_norm"])
     else:
         grads = T.grad(loss, params)
     learning_rate = theano.shared(floatX(0.01)) if "learning_rate" not in args else theano.shared(floatX(args["learning_rate"]))
+    sys.stderr.write("learning rate: %f\n" % args["learning_rate"])
     momentum = 0.9 if "momentum" not in args else args["momentum"]
     if "rmsprop" in args:
         sys.stderr.write("using rmsprop instead of nesterov momentum...\n")
@@ -188,32 +334,35 @@ def get_net_baseline(net_fn, args={}):
         updates = nesterov_momentum(grads, params, learning_rate=learning_rate, momentum=momentum)
     # index fns
     bs = args["batch_size"]
-    train_fn = theano.function(inputs=[X,y], outputs=loss, updates=updates)
-    loss_fn = theano.function(inputs=[X,y], outputs=loss_det)
-
+    train_fn = theano.function(inputs=[X,y,y_ord,w], outputs=loss, updates=updates, on_unused_input='warn')
+    loss_fn = theano.function(inputs=[X,y,y_ord,w], outputs=loss_det, on_unused_input='warn')
+    loss_fn_nondet = theano.function(inputs=[X,y,y_ord,w], outputs=loss, on_unused_input='warn')
+    
     preds_fn = theano.function(
         inputs=[X],
         outputs=T.argmax(net_out_det,axis=1)
     )
     dist_fn = theano.function(
         inputs=[X],
-        outputs=net_out_det
+        outputs=[net_out_det, exp_out_det]
     )
     dist_fn_nondet = theano.function(
         inputs=[X],
-        outputs=[net_out]
+        outputs=[net_out, exp_out]
     )
+    tmp_fn = theano.function(inputs=[X], outputs=tmp_out)
     
     return {
         "train_fn": train_fn,
         "loss_fn": loss_fn,
+        "loss_fn_nondet":loss_fn,
         "preds_fn": preds_fn,
         "dist_fn": dist_fn,
+        "tmp_fn":tmp_fn,
         "dist_fn_nondet": dist_fn_nondet,
         "l_out": l_out,
         "learning_rate": learning_rate,
-        "bs": bs,
-        "kappa_loss": args["kappa_loss"]
+        "bs": bs
     }
 
 
@@ -541,7 +690,11 @@ def resnet(quadrant, dd, first_time, nf=[32, 64, 128, 256], N=2, dropout_p=None)
         layer = residual_block(layer, nf[3], prefix="dd%i" % i, dd=dd)
         if dropout_p != None:
             layer = DropoutLayer(layer, p=dropout_p)
-    layer = Pool2DLayer(layer, pool_size=8, stride=1, mode="average_inc_pad")
+
+    #layer = Pool2DLayer(layer, pool_size=8, stride=1, mode="average_inc_pad")
+    # make this dynamic
+    layer = Pool2DLayer(layer, pool_size=layer.output_shape[-1], stride=1, mode="average_inc_pad")
+
     #layer = DenseLayer(layer, 
     #                   num_units=5, 
     #                   nonlinearity=softmax, 
@@ -553,6 +706,11 @@ def resnet(quadrant, dd, first_time, nf=[32, 64, 128, 256], N=2, dropout_p=None)
     else:
         return layer
 
+
+
+
+
+    
 
 def resnet_net(args={}):
     
@@ -756,10 +914,17 @@ def resnet_net_beefier(args={}):
     #l_dropout = DropoutLayer(l_merge, p=args["fc_p"])
 
     # left out
-    l_merge_left_sum = ElemwiseSumLayer([
-        l_merge_left,
-        l_merge_right
-    ])
+    if "concat" not in args:
+        l_merge_left_sum = ElemwiseSumLayer([
+            l_merge_left,
+            l_merge_right
+        ])
+    else:
+        l_merge_left_sum = ConcatLayer([
+            l_merge_left,
+            l_merge_right
+        ])
+    
     l_out_left = DenseLayer(
         l_merge_left_sum,
         num_units=5,
@@ -771,10 +936,17 @@ def resnet_net_beefier(args={}):
     # layers
 
     # right out
-    l_merge_right_sum = ElemwiseSumLayer([
-        l_merge_left,
-        l_merge_right
-    ])
+    if "concat" not in args:
+        l_merge_right_sum = ElemwiseSumLayer([
+            l_merge_left,
+            l_merge_right
+        ])
+    else:
+        l_merge_right_sum = ConcatLayer([
+            l_merge_left,
+            l_merge_right
+        ])
+        
 
     if args["fix_softmax"]:
         sys.stderr.write("fix softmax bug...\n")
@@ -836,8 +1008,164 @@ def resnet_net_256_baseline(args={}):
 
 
 
+def resnet_net_224_baseline(args={}):
+    
+    l_in = InputLayer( (None, 3, 224, 224) )
+    
+    dd, conv = resnet(l_in, {}, True, N=args["N"], dropout_p=args["dropout_p"] if "dropout_p" in args else None)
+    
+    if "end_dropout" in args:
+        sys.stderr.write("adding end dropout: %f\n" % args["end_dropout"])
+        conv = DropoutLayer(conv, p=args["end_dropout"])
+        
+    for layer in get_all_layers(conv):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+
+    if "out_nonlinearity" in args:
+        out_nonlinearity = args["out_nonlinearity"]
+        sys.stderr.write("using custom output nonlinearity instead of softmax\n")
+    else:
+        out_nonlinearity = softmax
+    
+    l_out = DenseLayer(
+        conv,
+        num_units=5,
+        nonlinearity=out_nonlinearity,
+        W=HeNormal()
+    )
+    
+    return {"l_out": l_out,
+            "l_in": l_in}
 
 
+
+def resnet_net_224_baseline_ordinal_layer(args={}):
+    
+    l_in = InputLayer( (None, 3, 224, 224) )
+    
+    dd, conv = resnet(l_in, {}, True, N=args["N"], dropout_p=args["dropout_p"] if "dropout_p" in args else None)
+    
+    if "end_dropout" in args:
+        sys.stderr.write("adding end dropout: %f\n" % args["end_dropout"])
+        conv = DropoutLayer(conv, p=args["end_dropout"])
+        
+    for layer in get_all_layers(conv):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+
+    #l_pre = DenseLayer(conv, num_units=5-1, nonlinearity=softplus, W=HeNormal())
+    #l_uro = UpperRightOnesLayer(l_pre)
+    #l_softmax = NonlinearityLayer(l_uro, nonlinearity=sigmoid)
+    #l_ord = OrdinalSubtractLayer(l_softmax)
+    #l_out = l_ord
+
+    l_out = DenseLayer(conv, num_units=5, nonlinearity=softmax, W=HeNormal())
+
+    for layer in get_all_layers(l_out):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+    
+    return {"l_out": l_out,
+            "l_in": l_in}
+
+
+
+"""
+ordinal structure with softplus
+"""
+def resnet_net_224_baseline_ordinal_layer_v2(args={}):
+    
+    l_in = InputLayer( (None, 3, 224, 224) )
+    
+    dd, conv = resnet(l_in, {}, True, N=args["N"], dropout_p=args["dropout_p"] if "dropout_p" in args else None)
+    
+    if "end_dropout" in args:
+        sys.stderr.write("adding end dropout: %f\n" % args["end_dropout"])
+        conv = DropoutLayer(conv, p=args["end_dropout"])
+        
+    for layer in get_all_layers(conv):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+
+    l_pre = DenseLayer(conv, num_units=5, nonlinearity=softplus, W=HeNormal())
+    l_uro = UpperRightOnesLayer(l_pre)
+    l_div = DivisionLayer(l_uro)
+    l_sub = SimpleOrdinalSubtractLayer(l_div)
+
+    l_out = l_sub
+    
+    #l_out = DenseLayer(conv, num_units=5, nonlinearity=softmax, W=HeNormal())
+
+    for layer in get_all_layers(l_out):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+    
+    return {"l_out": l_out,
+            "l_in": l_in}
+
+
+
+"""
+ordinal structure with linear then exp
+"""
+def resnet_net_224_baseline_ordinal_layer_v3(args={}):
+    
+    l_in = InputLayer( (None, 3, 224, 224) )
+    
+    dd, conv = resnet(l_in, {}, True, N=args["N"], dropout_p=args["dropout_p"] if "dropout_p" in args else None)
+    
+    if "end_dropout" in args:
+        sys.stderr.write("adding end dropout: %f\n" % args["end_dropout"])
+        conv = DropoutLayer(conv, p=args["end_dropout"])
+        
+    for layer in get_all_layers(conv):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+
+    l_pre = DenseLayer(conv, num_units=5, nonlinearity=linear, W=HeNormal())
+    l_pre = ExpressionLayer(l_pre, lambda X: T.exp(X))
+    l_uro = UpperRightOnesLayer(l_pre)
+    l_div = DivisionLayer(l_uro)
+    l_sub = SimpleOrdinalSubtractLayer(l_div)
+
+    l_out = l_sub
+    
+    #l_out = DenseLayer(conv, num_units=5, nonlinearity=softmax, W=HeNormal())
+
+    for layer in get_all_layers(l_out):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+    
+    return {"l_out": l_out,
+            "l_in": l_in}
+
+
+
+"""
+ordinal structure with tanh then exp
+"""
+def resnet_net_224_baseline_ordinal_layer_v4(args={}):
+    
+    l_in = InputLayer( (None, 3, 224, 224) )
+    
+    dd, conv = resnet(l_in, {}, True, N=args["N"], dropout_p=args["dropout_p"] if "dropout_p" in args else None)
+    
+    if "end_dropout" in args:
+        sys.stderr.write("adding end dropout: %f\n" % args["end_dropout"])
+        conv = DropoutLayer(conv, p=args["end_dropout"])
+        
+    for layer in get_all_layers(conv):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+
+    l_pre = DenseLayer(conv, num_units=5, nonlinearity=tanh, W=HeNormal())
+    l_pre = ExpressionLayer(l_pre, lambda X: T.exp(X))
+    l_uro = UpperRightOnesLayer(l_pre)
+    l_div = DivisionLayer(l_uro)
+    l_sub = SimpleOrdinalSubtractLayer(l_div)
+
+    l_out = l_sub
+    
+    #l_out = DenseLayer(conv, num_units=5, nonlinearity=softmax, W=HeNormal())
+
+    for layer in get_all_layers(l_out):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+    
+    return {"l_out": l_out,
+            "l_in": l_in}
 
 
 
@@ -1016,37 +1344,53 @@ imgen = ImageDataGenerator(featurewise_center=False,
     rescale=None)
 
 
-def load_image_keras(filename):
+def load_image_keras(filename, crop):
     img = io.imread(filename)
     img = img_as_float(img)
     img = np.asarray( [ img[...,0], img[...,1], img[...,2] ] ) # reshape
     for i in range(0, img.shape[0]):
         img[i, ...] = (img[i, ...] - np.mean(img[i, ...])) / np.std(img[i,...]) # zmuv
     for xb, _ in imgen.flow( np.asarray([img], dtype=img.dtype), np.asarray([0], dtype="int32")):
+        if crop != None:
+            img_size = xb[0].shape[-1]
+            #print xb[0].shape
+            #print img_size
+            x_start = np.random.randint(0, img_size-crop+1)
+            y_start = np.random.randint(0, img_size-crop+1)
+            ret = xb[0][:, y_start:y_start+crop, x_start:x_start+crop]
+            #print ret.shape
+            return ret
         break
     return xb[0]
     
 
 
 
-def iterate_baseline(X_arr, y_arr, bs, augment, zmuv, keras=False, DATA_DIR=os.environ["DATA_DIR"]):
+def construct_w(cls, num_classes=5):
+    w = [0]*num_classes
+    for i in range(0, len(w)):
+        w[i] = (i-cls)**2
+    w = np.asarray(w, dtype="float32")
+    #esw = w / 10.0
+    return w
+
+
+def iterate_baseline(X_arr, y_arr, bs, augment, zmuv, crop, DATA_DIR=os.environ["DATA_DIR"]):
     assert X_arr.shape[0] == y_arr.shape[0]
     b = 0
-    #DATA_DIR = os.environ["DATA_DIR"]
     while True:
         if b*bs >= X_arr.shape[0]:
             break
         this_X, this_y = X_arr[b*bs:(b+1)*bs], y_arr[b*bs:(b+1)*bs]
-
-        if not keras:
-            images_for_this_X = [ hp.load_image_fast("%s/%s.jpeg" % (DATA_DIR,filename), augment=augment, zmuv=zmuv) for filename in this_X ]
-        else:
-            images_for_this_X = [ load_image_keras("%s/%s.jpeg" % (DATA_DIR,filename) ) for filename in this_X ]
+        images_for_this_X = [ load_image_keras("%s/%s.jpeg" % (DATA_DIR,filename), crop) for filename in this_X ]
         images_for_this_X = np.asarray(images_for_this_X, dtype="float32")
 
-        yield images_for_this_X, this_y
+        this_w = []
+        for elem in this_y:
+            this_w.append(construct_w(elem))
+        this_w = np.asarray(this_w, dtype="float32")
         
-        # ---
+        yield images_for_this_X, this_y, this_w
         b += 1
 
 
@@ -1091,8 +1435,23 @@ def iterate(X_arr_left, X_arr_right, y_arr_left, y_arr_right, bs, augment, zmuv,
         # ---
         b += 1
 
+def cost(i,j):
+    return (i-j)**2
 
+def risk(p_dist, i):
+    assert i >= 0 and i < len(p_dist)
+    res = 0
+    for j in range(0, len(p_dist)):
+        res += p_dist[j]*cost(i,j)
+    return res
 
+def ord_encode(k, num_classes=5):
+    arr = [0]*num_classes
+    for i in range(0, k+1):
+        arr[i] = 1
+    return arr
+
+import pdb
 
 def train_baseline(net_cfg, 
           num_epochs,
@@ -1103,7 +1462,7 @@ def train_baseline(net_cfg,
           resume=None,
           augment=True,
           zmuv=False,
-          keras=False,
+          crop=None,
           schedule={}):
     # prepare the out_file
     l_out = net_cfg["l_out"]
@@ -1112,21 +1471,19 @@ def train_baseline(net_cfg,
     if resume == None:
         if out_file != None:
             f = open("%s.txt" % out_file, "wb")
-            f.write("epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,valid_kappa_exp,time\n")
+            f.write("epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,valid_kappa_exp,valid_kappa_mc,time\n")
         if print_out:
-            print "epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,valid_kappa_exp,time"
+            print "epoch,train_loss,avg_valid_loss,valid_accuracy,valid_kappa,valid_kappa_exp,valid_kappa_mc,time"
     else:
         sys.stderr.write("resuming training...\n")
         if out_file != None:
             f = open("%s.txt" % out_file, "ab")
         with open(resume) as g:
             set_all_param_values(l_out, pickle.load(g))
-
-        
             
     # extract functions
     X_train, y_train, X_valid, y_valid = data
-    train_fn, loss_fn, preds_fn, dist_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"], net_cfg["dist_fn"]
+    train_fn, loss_fn, preds_fn, dist_fn, dist_fn_nondet = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"], net_cfg["dist_fn"], net_cfg["dist_fn_nondet"]
     learning_rate = net_cfg["learning_rate"]
     bs = net_cfg["bs"]
     
@@ -1148,46 +1505,61 @@ def train_baseline(net_cfg,
         # training loop
         this_train_losses = []
         t0 = time()
-        for X_train_batch, y_train_batch in iterate_baseline(X_train, y_train, bs, augment, zmuv, keras):
-            this_train_losses.append( train_fn(X_train_batch, y_train_batch) )
+        for X_train_batch, y_train_batch, w_train_batch in iterate_baseline(X_train, y_train, bs, augment, zmuv, crop):
+            y_ord_train_batch = np.asarray([ord_encode(elem) for elem in y_train_batch], dtype="float32")
+            #debug_dist_pre_nondet = net_cfg["dist_fn_pre_nondet"](X_train_batch)
+            #pdb.set_trace()
+            this_train_losses.append( train_fn(X_train_batch, y_train_batch, y_ord_train_batch, w_train_batch) )
+            #print this_train_losses[-1]
         time_taken = time() - t0
         
         # validation loss loop
         this_valid_losses = []
-        for X_valid_batch, y_valid_batch, in iterate_baseline(X_valid, y_valid, bs, False, zmuv, keras):
-            this_valid_losses.append( loss_fn(X_valid_batch, y_valid_batch) )
+        for X_valid_batch, y_valid_batch, w_valid_batch in iterate_baseline(X_valid, y_valid, bs, False, zmuv, crop):
+            y_ord_valid_batch = np.asarray([ord_encode(elem) for elem in y_valid_batch], dtype="float32")
+            this_valid_losses.append( loss_fn(X_valid_batch, y_valid_batch, y_ord_valid_batch, w_valid_batch) )
         avg_valid_loss = np.mean(this_valid_losses)
         
         # validation accuracy loop
         valid_preds = []
         valid_preds_exp = []
+        valid_preds_metacost = []
         
-        for X_valid_batch, _ in iterate_baseline(X_valid, y_valid, bs, False, zmuv, keras):
+        for X_valid_batch, _, _ in iterate_baseline(X_valid, y_valid, bs, False, zmuv, crop):
+
             # just do argmax to get the predictions for valid_kappa
             preds = preds_fn(X_valid_batch).tolist()
             valid_preds += preds
+            
+            dists, dists_exp = dist_fn(X_valid_batch)
 
-            # compute the valid_kappa_exp
-            dists = dist_fn(X_valid_batch)
+            #pdb.set_trace()
+            
+            # compute the valid kappa exp
+            for dist in dists_exp:
+                #valid_preds_exp.append( int(np.round(np.dot(dist, np.arange(0,5)))) )
+                # the new way to do it
+                valid_preds_exp.append( int(np.round(dist)) )
+
+            # compute the metacost valid kappa
             for dist in dists:
-                valid_preds_exp.append( int(np.round(np.dot(dist, np.arange(0,5)))) )
+                valid_preds_metacost.append( np.argmin([ risk(dist, i) for i in range(0, len(dist)) ]) )
             
         valid_acc = np.mean(valid_preds == y_valid)
         
-        # validation set kappa
         valid_kappa = hp.weighted_kappa(human_rater=valid_preds, actual_rater=y_valid, num_classes=5)
-
         valid_kappa_exp = hp.weighted_kappa(human_rater=valid_preds_exp, actual_rater=y_valid, num_classes=5)
+        valid_kappa_mc = hp.weighted_kappa(human_rater=valid_preds_metacost, actual_rater=y_valid, num_classes=5)
         
         ## ------------ ##
         if f != None:
             f.write(
-                "%i,%f,%f,%f,%f,%f,%f\n" %
-                    (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, time_taken) 
+                "%i,%f,%f,%f,%f,%f,%f,%f\n" %
+                    (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, valid_kappa_mc, time_taken) 
             )
             f.flush()
         if print_out:
-            print "%i,%f,%f,%f,%f,%f,%f" % (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, time_taken)
+            print "%i,%f,%f,%f,%f,%f,%f,%f" % (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, valid_kappa_mc, time_taken)
             
         with open("models/%s.model.%i" % (os.path.basename(out_file),epoch+1), "wb") as g:
             pickle.dump(get_all_param_values(l_out), g, pickle.HIGHEST_PROTOCOL) 
@@ -1600,8 +1972,6 @@ if __name__ == "__main__":
             resume="models/new_only_augment_b64_zmuv_l2_more-aug.1.model.103.bak"
         )
 
-
-
     # try experimenting with keras' data augmentation
     # - is it faster?
     # - added shift width/height augment
@@ -1716,7 +2086,8 @@ if __name__ == "__main__":
             out_file="output_quadrant/slim_512_n4.%i" % seed,
             augment=True,
             zmuv=True,
-            keras=True
+            keras=True,
+            resume="models/slim_512_n4.1.model.8"
         )
 
 
@@ -1730,6 +2101,38 @@ if __name__ == "__main__":
 
     # ----------
 
+
+    if "RESNET_BEEFY_CONCAT" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_beefier, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "end_dropout":0.5, "fix_softmax":False, "concat":True })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/resnet-beefy_absorb_dfsm_d0.5_concat.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True,
+            resume="models/resnet-beefy_absorb_fsm_d0.5_dfsm.1.model.53.port-to-concat"
+        )
+
+
+
+
+
+
+
+    
     if "RESNET_BEEFY" in os.environ:
         seed = 1
         lasagne.random.set_rng( np.random.RandomState(seed) )
@@ -1821,7 +2224,7 @@ if __name__ == "__main__":
             cfg,
             num_epochs=1000,
             data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
-            out_file="output_quadrant/resnet-beefy_absorb_fsm_d0.5_dfsm_hl.%i" % seed,
+            out_file="output_quadrant/resnet-beefy_absorb_fsm_d0.5_dfsm_hl1e-4.%i" % seed,
             augment=True,
             zmuv=True,
             keras=True,
@@ -1960,6 +2363,54 @@ if __name__ == "__main__":
             keras=True
         )
 
+        
+    if "LOW_RES_BEEFY_ABSORB_DFSM_N4" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256_beefier, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":False, "N":4 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_beefy_dfsm_n4.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+
+        
+    if "LOW_RES_BEEFY_ABSORB_DFSM_N6" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256_beefier, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":False, "N":6 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_beefy_dfsm_n6.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+        
 
 
         
@@ -2038,7 +2489,611 @@ if __name__ == "__main__":
         )
 
 
+    if "LOW_RES_ABSORB_DFSM_N8" in os.environ:
+        sys.setrecursionlimit(15000)
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net(resnet_net_256, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":False, "N":8 })
+        # change the dataset so that 5% is valid set, not 10%
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        train(
+            cfg,
+            num_epochs=1000,
+            data=(X_train_left, X_train_right, y_train_left, y_train_right, X_valid_left, X_valid_right, y_valid_left, y_valid_right),
+            out_file="output_quadrant/low_res_dfsm_n8.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
 
+
+
+
+
+
+
+    if "LOW_RES_N2_BASELINE_KL4" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_256_baseline, { "kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "kl":1e-4, "learning_rate":0.01 })
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_kl4.%i" % seed,
+            augment=True,
+            zmuv=True,
+            resume="models/low_res_n2_baseline_kl4.1.model.98.bak"
+        )
+
+
+    if "LOW_RES_N2_BASELINE_KL2" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_256_baseline, { "kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "kl":1e-2, "learning_rate":0.01 })
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_kl2.%i" % seed,
+            augment=True,
+            zmuv=True,
+            resume="models/low_res_n2_baseline_kl2.1.model.141.bak"
+        )
+
+
+
+
+
+
+
+
+
+
+
+        
+    if "DEBUG1" in os.environ:
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "klo":True, "learning_rate":0.1 })
+        sys.exit(0)
+
+    if "LOW_RES_N2_BASELINE_KLO" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_256_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "klo":True, "learning_rate":0.1 })
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_klo_lr0.1.%i" % seed,
+            augment=True,
+            zmuv=True
+        )
+    if "LOW_RES_N2_BASELINE_KLO_RESUME" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_256_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "klo":True, "learning_rate":0.01 })
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_klo_lr0.1.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True,
+            resume="models/low_res_n2_baseline_klo_lr0.1.1.model.60.bak"
+        )
+    if "LOW_RES_N2_BASELINE_KLO_VALID_XENT" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_256_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "klo":True, "learning_rate":0.1 })
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_klo_vxent.%i" % seed,
+            augment=True,
+            zmuv=True,
+            schedule={61:0.01}
+        )
+    if "LOW_RES_N2_BASELINE_CROP_KLO_VALID_XENT" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "klo":True, "learning_rate":0.1 })
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_klo_vxent.%i" % seed,
+            augment=True,
+            zmuv=True,
+            schedule={61:0.01},
+            crop=224
+        )
+    
+
+
+
+        
+        
+
+
+    # ------------------------------------
+    # n=2 experiments
+    # ------------------------------------
+    if "LOW_RES_N2_BASELINE" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_256_baseline, { "kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2 })
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+    if "LOW_RES_N2_BASELINE_CROP" in os.environ:
+        seed = 1 # TAKE NOTICE!!!
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+
+    if "LOW_RES_N2_BASELINE_CROP_ORDINAL" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline_ordinal_layer, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_ordinal_fixed.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+
+    if "LOW_RES_N2_BASELINE_CROP_ORDINALV2" in os.environ:
+        seed = 1 # PAY ATTENTION TO THIS!!!
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline_ordinal_layer_v2, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_ordinalv2.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+
+    if "LOW_RES_N2_BASELINE_CROP_ORDINALV2_BINARYXENT" in os.environ:
+        seed = 1 # PAY ATTENTION TO THIS!!!
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline_ordinal_layer_v2,
+                {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "binary_xent":True })
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_ordinalv2_binaryxent.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+
+
+
+
+
+
+
+        
+    if "LOW_RES_N2_BASELINE_CROP_ORDINALV3" in os.environ:
+        seed = 1 # PAY ATTENTION TO THIS!!!
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline_ordinal_layer_v3, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_ordinalv3.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+    if "LOW_RES_N2_BASELINE_CROP_ORDINALV4" in os.environ:
+        seed = 1 # PAY ATTENTION TO THIS!!!
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline_ordinal_layer_v4, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_ordinalv4.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+    if "LOW_RES_N2_BASELINE_CROP_LEARN_END" in os.environ:
+        seed = 1 # TAKE NOTICE!!!
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"linear"})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_learn-end.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+
+    if "LOW_RES_N2_BASELINE_CROP_LEARN_END_SIGM_SCALED" in os.environ:
+        seed = 1 # TAKE NOTICE!!!
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"sigm_scaled"})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_learn-end_sigm-s.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+    if "LOW_RES_N2_BASELINE_CROP_LEARN_END_SIGM_SCALED_SIGMOUT" in os.environ:
+        seed = 1 # TAKE NOTICE!!!
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"sigm_scaled", "out_nonlinearity":sigmoid})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_learn-end_sigm-s_sigm-out.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+
+
+
+
+
+
+
+        
+    if "LOW_RES_N2_BASELINE_CROP_ORDINALXENT" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline_ordinal_layer, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "ordinal_xent": 1.0})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_ordinalxent-1-redo-1w.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+    if "LOW_RES_N2_BASELINE_CROP_ORDINALXENT2" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline_ordinal_layer, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "ordinal_xent": 2.0})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_ordinalxent-2.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+    if "LOW_RES_N2_BASELINE_CROP_ORDINALXENT3" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline_ordinal_layer, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "ordinal_xent": 3.0})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_ordinalxent-3.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+    if "LOW_RES_N2_BASELINE_CROP_ORDINALXENT5" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline_ordinal_layer, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "ordinal_xent": 5.0})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_ordinalxent-5.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+
+
+
+        
         
 
     if "LOW_RES_N4_BASELINE" in os.environ:
@@ -2066,6 +3121,89 @@ if __name__ == "__main__":
             augment=True,
             zmuv=True,
             keras=True
+        )
+    if "LOW_RES_N4_BASELINE_CROP" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":4, "learning_rate":0.01})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n4_baseline_crop.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+
+
+        
+
+
+    if "LOW_RES_N6_BASELINE" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_256_baseline, { "kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":6 })
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n6_baseline.%i" % seed,
+            augment=True,
+            zmuv=True,
+            keras=True
+        )
+    if "LOW_RES_N6_BASELINE_CROP" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":6, "learning_rate":0.01})
+        X_train_left = X_left[idxs][0 : int(0.95*X_left.shape[0])]
+        X_train_right = X_right[idxs][0 : int(0.95*X_right.shape[0])]
+        y_train_left = y_left[idxs][0 : int(0.95*y_left.shape[0])]
+        y_train_right = y_right[idxs][0 : int(0.95*y_left.shape[0])]
+        X_valid_left = X_left[idxs][int(0.95*X_left.shape[0]) ::]
+        X_valid_right = X_right[idxs][int(0.95*X_right.shape[0]) ::]
+        y_valid_left = y_left[idxs][int(0.95*y_left.shape[0]) ::]
+        y_valid_right = y_right[idxs][int(0.95*y_right.shape[0]) ::]
+        # ok, fix now
+        X_train = np.hstack((X_train_left, X_train_right))
+        X_valid = np.hstack((X_valid_left,X_valid_right))
+        y_train = np.hstack((y_train_left,y_train_right))
+        y_valid = np.hstack((y_valid_left,y_valid_right))
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n6_baseline_crop.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
         )
 
 
