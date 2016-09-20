@@ -139,7 +139,45 @@ def pred2():
                 else:
                     pred = int(np.round(np.dot(dist, np.arange(0,5))))
                 print name + "," + str(pred)
+
+
+
         
+def pred3():
+
+    test_dir = "/data/lisatmp4/beckhamc/test-trim-ben-r400-512"
+    cfg = get_net(resnet_net_beefier, { "kappa_loss": False, "batch_size": 64, "l2": 1e-4, "fix_softmax":True, "end_dropout":0.5 })
+    with open("models/resnet-beefy_absorb_fsm_d0.5_full.1.model.51.bak") as f:
+        set_all_param_values(cfg["l_out_pseudo"], pickle.load(f))
+    preds_fn = cfg["preds_fn"]
+    dist_fn = cfg["dist_fn_nondet"]
+    X_test_left, X_test_right = get_test_data(test_dir)
+
+    num_repeats = 5
+    bs = 128
+    for epoch in range(0, num_repeats):
+        for X_left_batch, X_right_batch in test_iterator(X_test_left, X_test_right, bs):
+            left_image_batch = [ hp.load_image_fast("%s/%s.jpeg" % (test_dir,left_image_name), augment=True, zmuv=True) for left_image_name in X_left_batch ]
+            right_image_batch = [ hp.load_image_fast("%s/%s.jpeg" % (test_dir,right_image_name), augment=True, zmuv=True) for right_image_name in X_right_batch ]
+            left_image_batch = np.asarray(left_image_batch, dtype="float32")
+            right_image_batch = np.asarray(right_image_batch, dtype="float32")
+            left_dist, right_dist = dist_fn(left_image_batch, right_image_batch)
+            # left dist = (bs, 5)
+            # right dist = (bs, 5)
+            for name, dist in zip(X_left_batch, left_dist):
+                #if sum(np.isnan(dist)) > 0:
+                #    pred = "nan"
+                #else:
+                #    pred = int(np.round(np.dot(dist, np.arange(0,5))))
+                #print name + "," + str(pred)
+                print name + "," + ",".join([str(b) for b in dist.tolist()])
+            for name, dist in zip(X_right_batch, right_dist):
+                #if sum(np.isnan(dist)) > 0:
+                #    pred = "nan"
+                #else:
+                #    pred = int(np.round(np.dot(dist, np.arange(0,5))))
+                #print name + "," + str(pred)
+                print name + "," + ",".join([str(b) for b in dist.tolist()])
 
 if __name__ == "__main__":
-    pred2()
+    pred3()
