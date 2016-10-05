@@ -265,6 +265,80 @@ if __name__ == "__main__":
         # stop at 60, then resume but keep at alpha=0.1
         # then 58 epochs after, stop then resume at alpha=0.01
 
+
+    if "LOW_RES_N2_BASELINE_CROP_QWK_S1" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "qwk":True, "learning_rate":0.01 })
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_qwk.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+    if "LOW_RES_N2_BASELINE_CROP_QWK_S1_RESUME" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "qwk":True, "learning_rate":0.001 })
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_qwk.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224,
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_qwk.1.modelv2.131.bak"
+        )
+    if "LOW_RES_N2_BASELINE_CROP_QWK_S2_RESUME" in os.environ:
+        seed = 2
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "qwk":True, "learning_rate":0.001 })
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_qwk.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224,
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_qwk.2.modelv2.130.bak"
+        )
+
+    if "LOW_RES_N2_BASELINE_CROP_LOGQWK_S1" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "log_qwk":True, "learning_rate":0.01 })
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_logqwk.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+    if "LOW_RES_N2_BASELINE_CROP_LOGQWK_S2" in os.environ:
+        seed = 2
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "log_qwk":True, "learning_rate":0.01 })
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_logqwk.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+
+
+
+
+        
     # resume both klo experiments
     if "LOW_RES_N2_BASELINE_CROP_KLO_VALID_XENT_RESUME" in os.environ:
         """
@@ -404,12 +478,44 @@ if __name__ == "__main__":
         cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"linear", "out_nonlinearity":rectify})
         train_baseline(
             cfg,
-            num_epochs=1000,
+            num_epochs=76+50,
             data=(X_train, y_train, X_valid, y_valid),
             out_file="output_quadrant/low_res_n2_baseline_crop_learn-end_relu-out.%i" % seed,
             augment=True,
             zmuv=True,
-            crop=224
+            crop=224,
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_learn-end_relu-out.1.modelv2.124",
+            schedule={77:0.001}
+        )
+        #124+76 epochs will get us to 200 epochs
+        #then at the start of the 201st epochs ('77') we switch to a=0.001 
+    if "LOW_RES_N2_BASELINE_CROP_LEARN_END_RELUOUT_S2" in os.environ:
+        seed = 2 # TAKE NOTICE!!!
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"linear", "out_nonlinearity":rectify})
+        train_baseline(
+            cfg,
+            num_epochs=250,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_learn-end_relu-out.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224,
+            schedule={201:0.001}
+        )
+    if "LOW_RES_N2_BASELINE_CROP_LEARN_END_RELUOUT_S3" in os.environ:
+        seed = 3 # TAKE NOTICE!!!
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"linear", "out_nonlinearity":rectify})
+        train_baseline(
+            cfg,
+            num_epochs=250,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_learn-end_relu-out.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224,
+            schedule={201:0.001}
         )
     
 

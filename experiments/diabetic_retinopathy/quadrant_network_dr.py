@@ -249,12 +249,34 @@ def sigm_scaled(x):
     k = 5 # 5 classes
     return sigmoid(x)*(k-1)
 
+def qwk(predictions, targets, num_classes=5):
+    w = np.ones((num_classes,num_classes))
+    for i in range(0, num_classes):
+        for j in range(0, num_classes):
+            w[i,j] = (i-j)**2
+    numerator = T.dot(targets.T, predictions)
+    denominator = T.outer(targets.sum(axis=0), predictions.sum(axis=0))
+    denominator = denominator / T.sum(numerator)
+    qwk = (T.sum(numerator*w) / T.sum(denominator*w))
+    return qwk
+
+def log_qwk(predictions, targets, num_classes=5):
+    w = np.ones((num_classes,num_classes))
+    for i in range(0, num_classes):
+        for j in range(0, num_classes):
+            w[i,j] = (i-j)**2
+    numerator = T.dot(targets.T, predictions)
+    denominator = T.outer(targets.sum(axis=0), predictions.sum(axis=0))
+    denominator = denominator / T.sum(numerator)
+    res = np.log(T.sum(numerator*w)) - np.log(T.sum(denominator*w))
+    return res
+
 def get_net_baseline(net_fn, args={}):
     
     X = T.tensor4('X')
     y = T.ivector('y')
     y_ord = T.fmatrix('y_ord')
-    w = T.fmatrix('w')
+    y_onehot = T.fmatrix('y_onehot')
     
     cfg = net_fn(args)
     l_out = cfg["l_out"]
@@ -278,7 +300,6 @@ def get_net_baseline(net_fn, args={}):
             sys.stderr.write("using sigm_scaled at the end instead of linear\n")
             l_exp = NonlinearityLayer(l_exp, nonlinearity=sigm_scaled)
 
-
     net_out, exp_out = get_output([l_out,l_exp], {l_in: X})
     net_out_det, exp_out_det = get_output([l_out,l_exp], {l_in: X}, deterministic=True)
 
@@ -292,6 +313,14 @@ def get_net_baseline(net_fn, args={}):
         sys.stderr.write("using squared_error for learn_end\n")
         loss = squared_error(exp_out, y.dimshuffle(0,'x')).mean()
         loss_det = categorical_crossentropy(net_out_det, y).mean()
+    elif "qwk" in args:
+        sys.stderr.write("using qwk loss\n")
+        loss = qwk(net_out, y_onehot)
+        loss_det = categorical_crossentropy(net_out_det, y).mean()
+    elif "log_qwk" in args:
+        sys.stderr.write("using log qwk loss\n")
+        loss = log_qwk(net_out, y_onehot)
+        loss_det = categorical_crossentropy(net_out_det, y).mean()        
     else:
         loss = categorical_crossentropy(net_out, y).mean()
         loss_det = categorical_crossentropy(net_out_det, y).mean()
@@ -324,18 +353,6 @@ def get_net_baseline(net_fn, args={}):
         # for the validation set.
         #loss_det += kl*hp.get_kappa_loss(5)(net_out_det, y).mean()
 
-    # pseudo cross-entropy trick
-    """
-    if "ordinal_xent" in args:
-        sys.stderr.write("ordinal xent lambda term: %f\n" % args["ordinal_xent"])
-        eps=1e-6
-        loss += ( args["ordinal_xent"] / ( 1 + categorical_crossentropy(net_out+eps, w).mean() ) )
-        # DO NOT evaluate the extra reg term
-        # for the validation set.
-    """
-
-    
-        
     #params = get_all_params(l_out, trainable=True)
     sys.stderr.write("params: %s\n" % str(params))
     if "max_norm" in args:
@@ -352,9 +369,9 @@ def get_net_baseline(net_fn, args={}):
         updates = nesterov_momentum(grads, params, learning_rate=learning_rate, momentum=momentum)
     # index fns
     bs = args["batch_size"]
-    train_fn = theano.function(inputs=[X,y,y_ord,w], outputs=loss, updates=updates, on_unused_input='warn')
-    loss_fn = theano.function(inputs=[X,y,y_ord,w], outputs=loss_det, on_unused_input='warn')
-    loss_fn_nondet = theano.function(inputs=[X,y,y_ord,w], outputs=loss, on_unused_input='warn')
+    train_fn = theano.function(inputs=[X,y,y_ord,y_onehot], outputs=loss, updates=updates, on_unused_input='warn')
+    loss_fn = theano.function(inputs=[X,y,y_ord,y_onehot], outputs=loss_det, on_unused_input='warn')
+    loss_fn_nondet = theano.function(inputs=[X,y,y_ord,y_onehot], outputs=loss, on_unused_input='warn')
     
     preds_fn = theano.function(
         inputs=[X],
@@ -1526,13 +1543,13 @@ def iterate_baseline(X_arr, y_arr, bs, augment, zmuv, crop, DATA_DIR=os.environ[
         this_X, this_y = X_arr[b*bs:(b+1)*bs], y_arr[b*bs:(b+1)*bs]
         images_for_this_X = [ load_image_keras("%s/%s.jpeg" % (DATA_DIR,filename), crop) for filename in this_X ]
         images_for_this_X = np.asarray(images_for_this_X, dtype="float32")
-
-        this_w = []
+        this_onehot = []
         for elem in this_y:
-            this_w.append(construct_w(elem))
-        this_w = np.asarray(this_w, dtype="float32")
-        
-        yield images_for_this_X, this_y, this_w
+            one_hot_vector = [0]*5
+            one_hot_vector[elem] = 1
+            this_onehot.append(one_hot_vector)
+        this_onehot = np.asarray(this_onehot, dtype="float32")
+        yield images_for_this_X, this_y, this_onehot
         b += 1
 
 
@@ -1665,19 +1682,18 @@ def train_baseline(net_cfg,
         # training loop
         this_train_losses = []
         t0 = time()
-        for X_train_batch, y_train_batch, w_train_batch in iterate_baseline(X_train, y_train, bs, augment, zmuv, crop):
+        for X_train_batch, y_train_batch, y_onehot_train_batch in iterate_baseline(X_train, y_train, bs, augment, zmuv, crop):
             y_ord_train_batch = np.asarray([ord_encode(elem) for elem in y_train_batch], dtype="float32")
             #debug_dist_pre_nondet = net_cfg["dist_fn_pre_nondet"](X_train_batch)
-            #pdb.set_trace()
-            this_train_losses.append( train_fn(X_train_batch, y_train_batch, y_ord_train_batch, w_train_batch) )
+            this_train_losses.append( train_fn(X_train_batch, y_train_batch, y_ord_train_batch, y_onehot_train_batch) )
             #print this_train_losses[-1]
         time_taken = time() - t0
         
         # validation loss loop
         this_valid_losses = []
-        for X_valid_batch, y_valid_batch, w_valid_batch in iterate_baseline(X_valid, y_valid, bs, False, zmuv, crop):
+        for X_valid_batch, y_valid_batch, y_onehot_valid_batch in iterate_baseline(X_valid, y_valid, bs, False, zmuv, crop):
             y_ord_valid_batch = np.asarray([ord_encode(elem) for elem in y_valid_batch], dtype="float32")
-            this_valid_losses.append( loss_fn(X_valid_batch, y_valid_batch, y_ord_valid_batch, w_valid_batch) )
+            this_valid_losses.append( loss_fn(X_valid_batch, y_valid_batch, y_ord_valid_batch, y_onehot_valid_batch) )
             #pdb.set_trace()
         avg_valid_loss = np.mean(this_valid_losses)
         
