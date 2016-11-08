@@ -164,13 +164,11 @@ def np_kappa(yb, yprob):
 def load_image_fast(filename, augment=False, zmuv=False, colour_cast=False):
     img = io.imread(filename)
     img = img_as_float(img)
+    # 17/07
+    # there was a bug, and no random rotate augmentation was done
+    # this is because randint(0,1) only gives you zeroes
     if augment:
-        g = random.randint(0, 1)
-        # flippng the img as well could be a bit excessive wrt
-        # computation time so maybe we should stick to rotations
-        if g == 1:
-            # do a random rotation
-            img = rotate(img, random.randint(0,360), cval=0.5)
+        img = rotate(img, random.randint(0,360), cval=0.5)
     if colour_cast:
         for j in range(0, img.shape[2]):
             img[:,:,j] = np.minimum(
@@ -180,7 +178,7 @@ def load_image_fast(filename, augment=False, zmuv=False, colour_cast=False):
     if len(img.shape) == 3 and img.shape[2] == 3:
         img = np.asarray( [ img[...,0], img[...,1], img[...,2] ] )
     else:
-        img = np.asarray( [ img ] )
+        img = np.asarray( [ img, img, img ] )
     if zmuv:
         for i in range(0, img.shape[0]):
             img[i, ...] = (img[i, ...] - np.mean(img[i, ...])) / np.std(img[i,...])
