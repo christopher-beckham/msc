@@ -54,18 +54,21 @@ if __name__ == "__main__":
     # baseline experiment
     # 'x-ent'
     if "LOW_RES_N2_BASELINE_CROP" in os.environ:
-        seed = 1 # TAKE NOTICE!!!
+        seed = 3 # TAKE NOTICE!!!
         lasagne.random.set_rng( np.random.RandomState(seed) )
         cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01})
         train_baseline(
             cfg,
-            num_epochs=1000,
+            num_epochs=250,
             data=(X_train, y_train, X_valid, y_valid),
             out_file="output_quadrant/low_res_n2_baseline_crop.%i" % seed,
             augment=True,
             zmuv=True,
-            crop=224
+            crop=224,
+            schedule={201: 0.001}
         )
+    #resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.1.model.150.bak",
+    #resume_legacy=True,
     # training set kappa = 0.81867196628 after 200 epochs
         
     # now we need to resume both of them under a lower learning rate
@@ -101,68 +104,49 @@ if __name__ == "__main__":
         
     
 
-    # use squared error loss, but since we still use softmax
-    # evaluate the x-ent on the validation set
-    # 'sq-err'
-    if "LOW_RES_N2_BASELINE_CROP_LEARN_END" in os.environ:
-        seed = 1 # TAKE NOTICE!!!
+
+
+
+    if "LOW_RES_N2_BASELINE_CROP_LEARN_END_KEEP_XENT" in os.environ:
+        seed = 1
         lasagne.random.set_rng( np.random.RandomState(seed) )
-        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"linear"})
+        cfg = get_net_baseline(resnet_net_224_baseline, {"batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"keep_xent"})
         train_baseline(
             cfg,
-            num_epochs=1000,
+            num_epochs=250-30,
             data=(X_train, y_train, X_valid, y_valid),
-            out_file="output_quadrant/low_res_n2_baseline_crop_learn-end.%i" % seed,
-            augment=True,
-            zmuv=True,
-            crop=224
-        )
-    if "LOW_RES_N2_BASELINE_CROP_LEARN_END_RESUME" in os.environ:
-        seed = 1 # TAKE NOTICE!!!
-        lasagne.random.set_rng( np.random.RandomState(seed) )
-        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"linear"})
-        train_baseline(
-            cfg,
-            num_epochs=50,
-            data=(X_train, y_train, X_valid, y_valid),
-            out_file="output_quadrant/low_res_n2_baseline_crop_learn-end.%i" % seed,
+            out_file="output_quadrant/low_res_n2_baseline_crop_learn-end-keep-xent.%i" % seed,
             augment=True,
             zmuv=True,
             crop=224,
-            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_learn-end.1.model.200",
-            resume_legacy=True
+            schedule={201-30: 0.001},
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_learn-end-keep-xent.1.modelv2.30.bak"
         )
-        seed = 2 # TAKE NOTICE!!!
-        lasagne.random.set_rng( np.random.RandomState(seed) )
-        cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"linear"})
-        train_baseline(
-            cfg,
-            num_epochs=50,
-            data=(X_train, y_train, X_valid, y_valid),
-            out_file="output_quadrant/low_res_n2_baseline_crop_learn-end.%i" % seed,
-            augment=True,
-            zmuv=True,
-            crop=224,
-            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_learn-end.2.modelv2.199"
-        )
+
+
+
+
 
         
 
     # use squared error loss, but since we still use softmax
     # evaluate the x-ent on the validation set
     # 'sq-err + scale'
+    # REDO this experiment
     if "LOW_RES_N2_BASELINE_CROP_LEARN_END_SIGM_SCALED" in os.environ:
-        seed = 2 # TAKE NOTICE!!!
+        seed = 1 # TAKE NOTICE!!!
         lasagne.random.set_rng( np.random.RandomState(seed) )
         cfg = get_net_baseline(resnet_net_224_baseline, {"kappa_loss": False, "batch_size": 128, "l2": 1e-4, "N":2, "learning_rate":0.01, "learn_end":"sigm_scaled"})
         train_baseline(
             cfg,
-            num_epochs=1000,
+            num_epochs=16+50,
             data=(X_train, y_train, X_valid, y_valid),
             out_file="output_quadrant/low_res_n2_baseline_crop_learn-end_sigm-s.%i" % seed,
             augment=True,
             zmuv=True,
-            crop=224
+            crop=224,
+            schedule={16+1: 0.001},
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_learn-end_sigm-s.1.modelv2.184.bak"
         )
 
     # use the squared error loss, but this time use sigmoid nonlinearity for 'h'
@@ -268,19 +252,41 @@ if __name__ == "__main__":
         # then 58 epochs after, stop then resume at alpha=0.01
 
 
+    if "LOW_RES_N2_BASELINE_CROP_KLO_VALID_XENT_S3" in os.environ:
+        seed = 3
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "klo":True, "learning_rate":0.1 })
+        train_baseline(
+            cfg,
+            num_epochs=100,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_klo_vxent.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224
+        )
+
+
+        
     if "LOW_RES_N2_BASELINE_CROP_QWK_S1" in os.environ:
         seed = 1
         lasagne.random.set_rng( np.random.RandomState(seed) )
         cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "qwk":True, "learning_rate":0.01 })
         train_baseline(
             cfg,
-            num_epochs=1000,
+            num_epochs=31+50,
             data=(X_train, y_train, X_valid, y_valid),
             out_file="output_quadrant/low_res_n2_baseline_crop_qwk.%i" % seed,
             augment=True,
             zmuv=True,
-            crop=224
+            crop=224,
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_qwk.1.modelv2.38.bak2",
+            schedule={31+1: 0.001}
         )
+        # earlier = low_res_n2_baseline_crop_qwk.1.modelv2.131.bak
+
+
+        
     if "LOW_RES_N2_BASELINE_CROP_QWK_S1_RESUME" in os.environ:
         seed = 1
         lasagne.random.set_rng( np.random.RandomState(seed) )
@@ -415,8 +421,8 @@ if __name__ == "__main__":
         )
     # /data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_qwkcf_balanced_bs512.1.modelv2.56.bak at lr=0.01
 
-    if "LOW_RES_N2_BASELINE_CROP_QWKCF_BALANCED_BS512_S2" in os.environ:
-        seed = 2
+    if "LOW_RES_N2_BASELINE_CROP_QWKCF_BALANCED_BS512_S1" in os.environ:
+        seed = 1
         lasagne.random.set_rng( np.random.RandomState(seed) )
         cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 512, "l2": 1e-4, "N":2, "qwk_cf":True, "learning_rate":0.01 })
         train_baseline(
@@ -506,17 +512,78 @@ if __name__ == "__main__":
             crop=224
         )
 
+
+
+
+    if "LOW_RES_N2_BASELINE_CROP_RESUME_QWKNORMW" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "qwk_normw":True, "learning_rate":0.01 })
+        train_baseline(
+            cfg,
+            num_epochs=100,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_resume_with_qwknormw.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224,
+            schedule={51: 0.001},
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.1.model.150.bak",
+            resume_legacy=True
+        )
+
+
+
         
         
     if "LOW_RES_N2_BASELINE_CROP_RESUME_QWK" in os.environ:
         seed = 1
         lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "qwk":True, "learning_rate":0.001 })
+        train_baseline(
+            cfg,
+            num_epochs=50,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_resume_with_qwk.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224,
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_resume_with_qwk.1.modelv2.50.bak",
+        )
+        #resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.1.model.150.bak",
+        #resume_legacy=True,
+
+    if "LOW_RES_N2_BASELINE_CROP_RESUME_QWK_S2" in os.environ:
+        seed = 2
+        lasagne.random.set_rng( np.random.RandomState(seed) )
         cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "qwk":True, "learning_rate":0.01 })
+        train_baseline(
+            cfg,
+            num_epochs=100,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_resume_with_qwk.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224,
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.2.model.150.bak",
+            resume_legacy=True,
+            schedule={51: 0.001}
+        )
+        #resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.1.model.150.bak",
+        #resume_legacy=True,
+
+
+
+        
+    if "LOW_RES_N2_BASELINE_CROP_RESUME_QWK_NM" in os.environ:
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "qwk_numerator_mean":True, "learning_rate":0.01 })
         train_baseline(
             cfg,
             num_epochs=1000,
             data=(X_train, y_train, X_valid, y_valid),
-            out_file="output_quadrant/low_res_n2_baseline_crop_resume_with_qwk.%i" % seed,
+            out_file="output_quadrant/low_res_n2_baseline_crop_resume_with_qwk_nm.%i" % seed,
             augment=True,
             zmuv=True,
             crop=224,
@@ -524,6 +591,24 @@ if __name__ == "__main__":
             resume_legacy=True
         )
 
+        
+    if "LOW_RES_N2_BASELINE_CROP_RESUME_KAPPA" in os.environ:
+        seed = 2
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "kappa":True, "learning_rate":0.01 })
+        train_baseline(
+            cfg,
+            num_epochs=1000,
+            data=(X_train, y_train, X_valid, y_valid),
+            out_file="output_quadrant/low_res_n2_baseline_crop_resume_with_kappa.%i" % seed,
+            augment=True,
+            zmuv=True,
+            crop=224,
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.1.model.150.bak",
+            resume_legacy=True
+        )
+
+        
 
     if "LOW_RES_N2_BASELINE_CROP_RESUME_QWK_BS512" in os.environ:
         seed = 1
@@ -540,9 +625,11 @@ if __name__ == "__main__":
             resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.1.model.150.bak",
             resume_legacy=True
         )
+        
+    if "LOW_RES_N2_BASELINE_CROP_RESUME_QWK_BALANCED_BS512" in os.environ:
         seed = 1
         lasagne.random.set_rng( np.random.RandomState(seed) )
-        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 512, "l2": 1e-4, "N":2, "qwk":True, "learning_rate":0.01 })
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "qwk":True, "learning_rate":0.01 })
         train_baseline(
             cfg,
             num_epochs=100,
@@ -551,28 +638,37 @@ if __name__ == "__main__":
             augment=True,
             zmuv=True,
             crop=224,
-            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.1.model.150.bak",
-            resume_legacy=True,
-            balanced_minibatches=True
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_resume_with_qwk_bs512.1.modelv2.100.bak",
+            skip_train=True,
+            save_valid_dists="valid_dist/low_res_n2_baseline_crop_resume_with_qwk_balanced_bs512.%i" % seed
         )
+    # resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.1.model.150.bak"
 
     if "LOW_RES_N2_BASELINE_CROP_RESUME_QWKCF_BS512" in os.environ:
         seed = 1
         lasagne.random.set_rng( np.random.RandomState(seed) )
-        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 512, "l2": 1e-4, "N":2, "qwk_cf":True, "learning_rate":0.01 })
+        cfg = get_net_baseline(resnet_net_224_baseline, { "batch_size": 128, "l2": 1e-4, "N":2, "qwk_cf":True, "learning_rate":0.01 })
         train_baseline(
             cfg,
-            num_epochs=1000,
+            num_epochs=1,
             data=(X_train, y_train, X_valid, y_valid),
             out_file="output_quadrant/low_res_n2_baseline_crop_resume_with_qwkcf_bs512.%i" % seed,
             augment=True,
             zmuv=True,
             crop=224,
-            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_resume_with_qwkcf_bs512.1.modelv2.245.bak",
-            balanced_minibatches=True
+            resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_resume_with_qwkcf_bs512.1.modelv2.102.bak2",
+            balanced_minibatches=False,
+            skip_train=True,
+            save_valid_dists="valid_dist/low_res_n2_baseline_crop_resume_with_qwkcf_bs512.%i" % seed
         )
-# resume_legacy=True
-#             resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.1.model.150.bak"    
+        # first resume
+        # resume_legacy=True
+        # resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop.1.model.150.bak"
+        # second resume
+        # resume="/data/lisatmp4/beckhamc/models_neat/low_res_n2_baseline_crop_resume_with_qwkcf_bs512.1.modelv2.102.bak2"
+
+
+        
         
     if "LOW_RES_N2_BASELINE_CROP_RESUME_QWKCF_BS512_BUT_LOWER_LR" in os.environ:
         seed = 1
