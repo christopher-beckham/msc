@@ -5,7 +5,7 @@ os.environ["HDF5_DISABLE_VERSION_CHECK"] = "1"
 from keras.preprocessing.image import ImageDataGenerator
 
 imgen = ImageDataGenerator()
-xt, yt, xv, yv = datasets.adience.get_fold(0)
+xt, yt, xv, yv = datasets.adience.load_data(0, "/Volumes/CB_RESEARCH/adience_face/aligned")
 for xb, yb in iterate_filenames(xt, yt, bs=32, imgen=imgen, num_classes=8, crop=None):
     print xb, yb
     break
