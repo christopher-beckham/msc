@@ -49,7 +49,7 @@ class NeuralNet():
 
     def __init__(self, net_fn, num_classes, optimiser=nesterov_momentum,
                      optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, mode="x_ent", args={}, debug=False):
-        assert mode in ["x_ent", "emd2", "emd22", "xemd2", "exp", "qwk"]
+        assert mode in ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk"]
         self.num_classes = num_classes
         self.learning_rate = optimiser_args["learning_rate"]
         self.debug = debug
@@ -62,11 +62,10 @@ class NeuralNet():
         self.l_in = get_all_layers(self.l_out)[0]
         self.l_out_endpt = None
         # theano variables
-        X = T.tensor4('X')
+        X = T.tensor4('X'); self.input_tensor = X
         y = T.fmatrix('y')
-        y_ord = T.fmatrix('y_ord')
-        y_cum = T.fmatrix('y_cum')
-        y_int = T.ivector('y_int')
+        y_ord, y_cum, y_int, y_soft = T.fmatrix('y_ord'), T.fmatrix('y_cum'), T.ivector('y_int'), T.fmatrix('y_soft')
+        self.y_soft_sigma = 1.
         # ---
         self.params = get_all_params(self.l_out, trainable=True)
         if self.debug:
@@ -81,10 +80,15 @@ class NeuralNet():
                 print "train_loss: x_ent"
             train_loss = categorical_crossentropy(self.net_out, y).mean()
             self.l_out_endpt = self.l_out
+        elif mode == "soft":
+            if self.debug:
+                print "train_loss: soft"
+                train_loss = categorical_crossentropy(self.net_out, y_soft).mean()
+                self.l_out_endpt = self.l_out
+            self.y_soft_sigma = args["y_soft_sigma"]
         elif mode == "emd2":
             if self.debug:
                 print "train_loss: emd2"
-            #train_loss = squared_error(self.net_out_cum, y_cum).mean()
             train_loss = squared_error(self.net_out_cum, y_cum).sum(axis=1).mean()
             self.l_out_endpt = self.l_out_cum
         elif mode == "emd22":
@@ -116,13 +120,15 @@ class NeuralNet():
         loss_emd = squared_error(self.net_out_cum_det, y_cum).mean()
         grads = T.grad(train_loss, self.params)
         updates = optimiser(grads, self.params, **optimiser_args)
-        train_fn = theano.function(inputs=[X, y, y_ord, y_cum, y_int], outputs=[train_loss, loss_xent], updates=updates,
+        train_fn = theano.function(inputs=[X, y, y_ord, y_cum, y_int, y_soft], outputs=[train_loss, loss_xent], updates=updates,
                                    on_unused_input='warn')
+        loss_fn = theano.function(inputs=[X, y, y_ord, y_cum, y_int, y_soft], outputs=train_loss, on_unused_input='warn')
         xent_fn = theano.function(inputs=[X, y], outputs=loss_xent)
         emd_fn = theano.function(inputs=[X, y_cum], outputs=loss_emd)
         dists_fn = theano.function(inputs=[X], outputs=[self.net_out_det, self.net_out_cum_det, self.net_out_exp_det])
         self.fns = {
             "train_fn": train_fn,
+            "loss_fn": loss_fn,
             "xent_fn": xent_fn,
             "emd_fn": emd_fn,
             "dists_fn": dists_fn
@@ -153,7 +159,17 @@ class NeuralNet():
 
     def train(self, data, iterator_fn, batch_size, num_epochs, out_dir, schedule={}, resume=None, save_every=1, save_to=None, rnd_state=np.random.RandomState(0), debug=False):
         assert save_every >= 1
-        header = ["epoch", "train_loss", "train_xent", "valid_xent", "valid_emd", "valid_xent_accuracy", "valid_exp_accuracy", "valid_xent_qwk", "valid_exp_qwk", "learning_rate", "time"]
+        header = ["epoch",
+                  "train_loss",
+                  "train_xent",
+                  "valid_loss",
+                  "valid_xent",
+                  "valid_emd",
+                  "valid_xent_accuracy",
+                  "valid_exp_accuracy",
+                  "valid_xent_qwk",
+                  "valid_exp_qwk",
+                  "learning_rate", "mb_time", "time"]
         if not os.path.exists(out_dir):
             os.makedirs(out_dir)
         # initialise log files
@@ -169,28 +185,29 @@ class NeuralNet():
             fs["f_out_file"].write(",".join(header) + "\n")
         print ",".join(header)
         Xt, yt, Xv, yv = data
-        train_fn, xent_fn, emd_fn, dists_fn = self.fns["train_fn"], self.fns["xent_fn"], self.fns["emd_fn"], self.fns["dists_fn"]
+        train_fn, loss_fn, xent_fn, emd_fn, dists_fn = \
+                self.fns["train_fn"], self.fns["loss_fn"], self.fns["xent_fn"], self.fns["emd_fn"], self.fns["dists_fn"]
         for epoch in range(num_epochs):
             t0 = time()
             if epoch+1 in schedule:
                 self.learning_rate.set_value( floatX(schedule[epoch+1]) )
-            train_losses = []
-            train_xent_losses = []
+            train_losses, train_xent_losses, mb_time = [], [], []
             for Xb, yb in iterator_fn(Xt, yt, bs=batch_size, num_classes=self.num_classes, rnd_state=rnd_state):
-                yb_ord, yb_cum, yb_int = helpers.one_hot_to_ord(yb), helpers.one_hot_to_cmf(yb), helpers.one_hot_to_label(yb)
-                t1, t2 = train_fn(Xb, yb, yb_ord, yb_cum, yb_int)
+                yb_ord, yb_cum, yb_int, yb_soft = \
+                    helpers.one_hot_to_ord(yb), helpers.one_hot_to_cmf(yb), helpers.one_hot_to_label(yb), helpers.one_hot_to_soft(yb,self.y_soft_sigma)
+                mb_t0 = time()
+                t1, t2 = train_fn(Xb, yb, yb_ord, yb_cum, yb_int, yb_soft)
+                mb_time.append( time()-mb_t0 )
                 train_losses.append(t1); fs["f_train_loss"].write("%f\n" % t1)
                 train_xent_losses.append(t2); fs["f_train_xent"].write("%f\n" % t2)
                 if debug:
                     break
-            valid_xent_losses = []
-            valid_emd_losses = []
-            valid_xent_correct = []
-            valid_exp_correct = []
-            valid_xent_preds = [] # integer labels for argmax
-            valid_exp_preds = [] # integer labels for exp
+            valid_losses, valid_xent_losses, valid_emd_losses, valid_xent_correct, valid_exp_correct, valid_xent_preds, valid_exp_preds = \
+                [], [], [], [], [], [], []
             for Xb, yb in iterator_fn(Xv, yv, bs=batch_size, num_classes=self.num_classes):
-                yb_ord, yb_cum, yb_int = helpers.one_hot_to_ord(yb), helpers.one_hot_to_cmf(yb), helpers.one_hot_to_label(yb)
+                yb_ord, yb_cum, yb_int, yb_soft = \
+                    helpers.one_hot_to_ord(yb), helpers.one_hot_to_cmf(yb), helpers.one_hot_to_label(yb), helpers.one_hot_to_soft(yb,self.y_soft_sigma)
+                valid_losses.append( loss_fn(Xb, yb, yb_ord, yb_cum, yb_int, yb_soft) )
                 valid_xent_losses.append( xent_fn(Xb, yb) ); fs["f_valid_xent"].write("%f\n" % valid_xent_losses[-1])
                 valid_emd_losses.append( emd_fn(Xb, yb_cum) )
                 d_xent, d_cum, d_exp = dists_fn(Xb)
@@ -202,12 +219,14 @@ class NeuralNet():
                 valid_exp_preds += [ int(x) for x in np.round(d_exp)[:,0].tolist() ]
                 if debug:
                     break
+            print np.mean(mb_time)
             valid_xent_qwk = helpers.weighted_kappa(actual_rater=yv[:].tolist(), human_rater=valid_xent_preds, num_classes=self.num_classes)
             valid_exp_qwk = helpers.weighted_kappa(actual_rater=yv[:].tolist(), human_rater=valid_exp_preds, num_classes=self.num_classes)
-            to_write = "%i,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f" % \
+            to_write = "%i,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f" % \
                        (epoch+1,
                         np.mean(train_losses),
                         np.mean(train_xent_losses),
+                        np.mean(valid_losses),
                         np.mean(valid_xent_losses),
                         np.mean(valid_emd_losses),
                         np.mean(valid_xent_correct),
@@ -215,6 +234,7 @@ class NeuralNet():
                         valid_xent_qwk,
                         valid_exp_qwk,
                         self.learning_rate.get_value(),
+                        np.mean(mb_time),
                         time()-t0)
             fs["f_out_file"].write("%s\n" % to_write)
             print to_write
@@ -230,29 +250,27 @@ class NeuralNet():
         :param out_file: p(y|x)
         :return:
         """
-        with open(out_file) as f:
-            for Xb, _ in iterator_fn(X, X, bs=batch_size, num_classes=self.num_classes):
-                dists = self.fns["dist_fn"](Xb)
-                for row in dists:
+        with open(out_file,"wb") as f:
+            for Xb, yb in iterator_fn(X, y, bs=batch_size, num_classes=self.num_classes):
+                dists, _, _ = self.fns["dists_fn"](Xb)
+                for i, row in enumerate(dists):
                     row = [ str(elem) for elem in row.tolist() ]
+                    row.append(str(np.argmax(yb[i])))
+                    f.write(",".join(row) + "\n")
+
+    def dump_output_for_layer(self, layer, X, y, iterator_fn, batch_size, out_file):
+        print "dumping output for layer %s with output shape %s" % (str(layer), str(layer.output_shape))
+        with open(out_file, "wb") as f:
+            layer_out = get_output(layer, self.input_tensor)
+            layer_out_fn = theano.function([self.input_tensor], layer_out)
+            for Xb, yb in iterator_fn(X, y, bs=batch_size, num_classes=self.num_classes):
+                # e.g. (bs, p)
+                out_for_this_batch = layer_out_fn(Xb)
+                for i, row in enumerate(out_for_this_batch):
+                    row = row.flatten().tolist()
+                    row = [ str(elem) for elem in row ]
+                    row.append(str(np.argmax(yb[i])))
                     f.write(",".join(row) + "\n")
 
 if __name__ == '__main__':
-    import datasets.mnist
-    import architectures.simple
-
-    print architectures.simple.light_net
-
-    #data, iterator_fn, batch_size, num_epochs, out_file,
-
-    nn = NeuralNet(architectures.simple.light_net, num_classes=10, learning_rate=0.01, momentum=0.9, mode="earth_mover", args={})
-    print nn
-
-    nn.train(
-        datasets.mnist.load_mnist("../../data/mnist.pkl.gz"),
-        iterators.iterate, batch_size=32, num_epochs=10, out_dir="/tmp", debug=False)
-
-
-
-    #xin = np.ones((10, 1, 28, 28))
-    #nn.dump_dists(X=xin, iterator_fn=iterators.iterate, batch_size=5, out_file="/tmp/test.txt")
+    pass

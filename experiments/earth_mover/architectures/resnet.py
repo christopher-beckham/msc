@@ -8,6 +8,10 @@ from lasagne.objectives import *
 from lasagne.updates import *
 from lasagne.regularization import *
 
+def _remove_trainable(layer):
+    for key in layer.params:
+        layer.params[key].remove('trainable')
+
 def _residual_block(layer, n_out_channels, prefix, stride=1, nonlinearity=rectify):
     """
     residual block
@@ -89,10 +93,28 @@ def _resnet_2x4(l_in, nf=[32, 64, 128, 256], N=2):
     layer = FlattenLayer(layer)
     return layer
 
+def _add_pois(layer, num_classes, end_nonlinearity, tau):
+    from scipy.misc import factorial
+    layer = DenseLayer(layer, num_units=1, nonlinearity=end_nonlinearity)
+    l_copy = DenseLayer(layer, num_units=num_classes, nonlinearity=linear)
+    l_copy.W.set_value( np.ones((1,num_classes)).astype("float32") )
+    _remove_trainable(l_copy)
+    l_pois = ExpressionLayer(l_copy, lambda x: ((c*T.log(x)) - x - T.log(cf)) / tau )
+    c = np.asarray([[(i+1) for i in range(0, num_classes)]], dtype="float32")
+    cf = factorial(c)
+    l_softmax = NonlinearityLayer(l_pois, nonlinearity=softmax)    
+    return l_softmax
+
 def resnet_2x4_adience(args):
     layer = InputLayer((None,3,224,224))
     layer = _resnet_2x4(layer)
     layer = DenseLayer(layer, num_units=8, nonlinearity=softmax)
+    return layer
+
+def resnet_2x4_adience_pois(args):
+    layer = InputLayer((None,3,224,224))
+    layer = _resnet_2x4(layer)
+    layer = _add_pois(layer, end_nonlinearity=args["end_nonlinearity"], num_classes=8, tau=args["tau"])
     return layer
 
 def resnet_2x4_dr(args):
@@ -101,7 +123,12 @@ def resnet_2x4_dr(args):
     layer = DenseLayer(layer, num_units=5, nonlinearity=softmax)
     return layer
 
-
+def resnet_2x4_dr_pois(args):
+    layer = InputLayer((None,3,224,224))
+    layer = _resnet_2x4(layer)
+    layer = _add_pois(layer, end_nonlinearity=args["end_nonlinearity"], num_classes=5, tau=args["tau"])
+    return layer
+    
 if __name__ == '__main__':
 
     l_in = InputLayer((None, 3, 224, 224))

@@ -1,5 +1,6 @@
 import numpy as np
 from theano import tensor as T
+from scipy.stats import norm
 
 def one_hot_to_cmf(x):
     """
@@ -33,6 +34,17 @@ def one_hot_to_ord(x):
         tot.append(arr)
     tot = np.asarray(tot, dtype=x.dtype)
     return tot
+
+def one_hot_to_soft(y, sigma=1.0):
+    # TODO: vectorise
+    y_softs = np.zeros(y.shape, dtype=y.dtype)
+    for i in range(y.shape[0]):
+        this_y = np.zeros(y.shape[1], dtype=y.dtype)
+        for j in range(y.shape[1]):
+            this_y[j] = norm.pdf(j, np.argmax(y[i]), sigma)
+        y_softs[i] = this_y
+        y_softs[i] = y_softs[i] / np.sum(y_softs[i])
+    return y_softs
 
 def label_to_one_hot(this_y, num_classes):
     this_onehot = []

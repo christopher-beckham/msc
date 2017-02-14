@@ -1,0 +1,3 @@
+epoch,train_loss,train_xent,valid_loss,valid_xent,valid_emd,valid_xent_accuracy,valid_exp_accuracy,valid_xent_qwk,valid_exp_qwk,learning_rate,mb_time,time
+1,1.768808,3.495538,1.636267,0.978888,0.107433,0.648464,0.212742,0.301514,0.216275,0.010000,0.635965,525.297429
+2,1.650331,0.927935,1.623344,0.839575,0.082870,0.726394,0.331627,0.345370,0.305418,0.010000,0.555037,516.799934

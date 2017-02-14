@@ -3,6 +3,11 @@ from skimage import img_as_float
 import numpy as np
 import pdb
 import helpers
+from fuel.datasets import H5PYDataset
+from fuel.schemes import ShuffledScheme, SequentialScheme
+from fuel.transformers import MultiProcessing
+from fuel.streams import DataStream, ServerDataStream
+import eugene.io as eugene_io
 
 def _augment_image(img, imgen=None, crop=None):
     if imgen == None and crop == None:
@@ -20,6 +25,16 @@ def _augment_image(img, imgen=None, crop=None):
             return ret
         break
     return xb[0]
+
+# TODO: look at https://github.com/fchollet/keras/issues/3338
+def augment_images(imgs, imgen=None, crop=None):
+    new_shape = imgs.shape
+    if crop != None:
+        new_shape = (imgs.shape[0], imgs.shape[1], crop, crop)
+    new_imgs = np.zeros(new_shape)
+    for i in range(0, new_imgs.shape[0]):
+        new_imgs[i] = _augment_image(imgs[i], imgen, crop)
+    return new_imgs.astype("float32")
 
 def _load_image_from_filename(filename, imgen=None, crop=None, debug=False):
     """
@@ -138,6 +153,20 @@ def iterate_filenames(imgen=None, crop=None):
             b += 1
     return _iterate_filenames
 
+def iterate_semi_shuffle_async(imgen=None, crop=None):
+    def _iterate_semi_shuffle_async(X_arr, y_arr, bs, num_classes, rnd_state=None):
+        def preprocessor_functor(batch):
+            batch_X, batch_y = batch
+            return augment_images(batch_X, imgen, crop), batch_y
+        assert X_arr.shape[0] == y_arr.shape[0]
+        shuffle = True
+        if rnd_state == None:
+            shuffle = False
+        df = eugene_io.data_flow(data=[X_arr, y_arr], batch_size=bs, loop_forever=False, shuffle=shuffle, rnd_state=rnd_state, preprocessor=preprocessor_functor)
+        for this_X, this_y in df.flow():
+            yield this_X, helpers.label_to_one_hot(this_y, num_classes)
+    return _iterate_semi_shuffle_async
+
 def iterate_hdf5(imgen=None, crop=None):
     def _iterate_hdf5(X_arr, y_arr, bs, num_classes, rnd_state=None):
         assert X_arr.shape[0] == y_arr.shape[0]
@@ -152,5 +181,45 @@ def iterate_hdf5(imgen=None, crop=None):
             yield images_for_this_X, this_onehot
     return _iterate_hdf5
 
+def iterate_hdf5_fuel(dataset_dir, imgen=None, crop=None):
+    def _iterate_hdf5_fuel(X_id, y_arr, bs, num_classes, rnd_state=None):
+        # HACKY: because this is meant to be used in tandem with
+        # the load_pre_split_data_into_memory_as_hdf5_fuel method,
+        # X_arr is not a tensor, it is a string
+        assert isinstance(X_arr, str)
+        dataset = H5PYDataset(dataset_dir, which_sets=(X_id, ))
+        iterator_scheme = SequentialScheme(batch_size=bs, examples=dataset.num_examples)
+        ds = MultiProcessing(DataStream(dataset=dataset, iteration_scheme=iterator_scheme), max_store=20)
+        for this_X, this_y in ds.get_epoch_iterator():
+            images_for_this_X = [ _augment_image(img, imgen, crop) for img in this_X ]
+            images_for_this_X = np.asarray(images_for_this_X, dtype="float32")
+            this_onehot = helpers.label_to_one_hot(this_y, num_classes)
+            yield images_for_this_X, this_onehot
+    return _iterate_hdf5_fuel
+
+def iterate_hdf5_fuel_server(imgen=None, crop=None):
+    def _iterate_hdf5_fuel_server(X_port, y_arr, num_classes, **kwargs):
+        # HACKY: because this is meant to be used in tandem with
+        # the load_pre_split_data_into_memory_as_hdf5_fuel_server method,
+        # X_id is not a tensor, it is a SERVER PORT
+        assert isinstance(X_port, int )
+        ds = ServerDataStream((X_port,), produces_examples=False, port=port)
+        for this_X, this_y in ds.get_epoch_iterator():
+            images_for_this_X = [ _augment_image(img, imgen, crop) for img in this_X ]
+            images_for_this_X = np.asarray(images_for_this_X, dtype="float32")
+            this_onehot = helpers.label_to_one_hot(this_y, num_classes)
+            yield images_for_this_X, this_onehot
+    return _iterate_hdf5_fuel_server
+
 if __name__ == '__main__':
-    pass
+    # test fuel server
+    #itr = iterate_hdf5_fuel_server()
+    #for x, y in itr("train", None, num_classes=5):
+    #    print x.shape, y.shape
+    #    break
+
+    X = np.eye(10).astype("float32")
+    y = np.argmax(X,axis=1).astype("int32")
+    
+    for Xb, yb in iterate_semi_shuffle_async()(X, y, bs=2, num_classes=1, rnd_state=np.random.RandomState(10)):
+        print Xb, yb
