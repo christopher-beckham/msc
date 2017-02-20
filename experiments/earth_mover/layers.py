@@ -62,16 +62,17 @@ class OrdinalSubtractLayer(Layer):
         return result
 
 class TauLayer(Layer):
-    def __init__(self, incoming, tau, bias=1.0, **kwargs):
+    def __init__(self, incoming, tau, bias=1.0, nonlinearity=linear, **kwargs):
         super(TauLayer, self).__init__(incoming, **kwargs)
         self.tau = self.add_param(tau, (1,), name='tau', regularizable=False)
         self.bias = bias
+        self.nonlinearity = nonlinearity
 
     def get_output_shape_for(self, input_shape):
         return input_shape
 
     def get_output_for(self, input, **kwargs):
-        result = input / (self.bias + self.tau)
+        result = input / (self.bias + self.nonlinearity(self.tau))
         return result
     
 if __name__ == '__main__':

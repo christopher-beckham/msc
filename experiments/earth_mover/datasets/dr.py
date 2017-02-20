@@ -7,11 +7,7 @@ import iterators
 from keras.preprocessing.image import ImageDataGenerator
 import pdb
 
-def load_pre_split_data(out_dir):
-    """
-    this returns 10% validation, not 5% like in the
-    squared error reformulation paper!!!
-    """
+def load_pre_split_data(out_dir, split_pt=0.9):
     
     with open("%s/datasets/dr.pkl" % os.environ["EARTH_MOVER"]) as f:
         dat = pickle.load(f)
@@ -29,16 +25,14 @@ def load_pre_split_data(out_dir):
     #np.random.shuffle(idxs)
     rnd.shuffle(idxs)
 
-    t=0.9
-
-    X_train_left = X_left[idxs][0 : int(t*X_left.shape[0])]
-    X_train_right = X_right[idxs][0 : int(t*X_right.shape[0])]
-    y_train_left = y_left[idxs][0 : int(t*y_left.shape[0])]
-    y_train_right = y_right[idxs][0 : int(t*y_left.shape[0])]
-    X_valid_left = X_left[idxs][int(t*X_left.shape[0]) ::]
-    X_valid_right = X_right[idxs][int(t*X_right.shape[0]) ::]
-    y_valid_left = y_left[idxs][int(t*y_left.shape[0]) ::]
-    y_valid_right = y_right[idxs][int(t*y_right.shape[0]) ::]
+    X_train_left = X_left[idxs][0 : int(split_pt*X_left.shape[0])]
+    X_train_right = X_right[idxs][0 : int(split_pt*X_right.shape[0])]
+    y_train_left = y_left[idxs][0 : int(split_pt*y_left.shape[0])]
+    y_train_right = y_right[idxs][0 : int(split_pt*y_left.shape[0])]
+    X_valid_left = X_left[idxs][int(split_pt*X_left.shape[0]) ::]
+    X_valid_right = X_right[idxs][int(split_pt*X_right.shape[0]) ::]
+    y_valid_left = y_left[idxs][int(split_pt*y_left.shape[0]) ::]
+    y_valid_right = y_right[idxs][int(split_pt*y_right.shape[0]) ::]
     # ok, fix now
     X_train = np.hstack((X_train_left, X_train_right))
     X_valid = np.hstack((X_valid_left,X_valid_right))
@@ -57,9 +51,9 @@ def load_pre_split_data_in_memory(data_dir):
         xv[i] = iterators._load_image_from_filename(xv_filenames[i])
     return xt, yt, xv, yv
 
-def _write_pre_split_data_to_hdf5(data_dir, out_file):
+def _write_pre_split_data_to_hdf5(data_dir, out_file, split_pt):
     import h5py
-    xt_filenames, yt, xv_filenames, yv = load_pre_split_data(data_dir)
+    xt_filenames, yt, xv_filenames, yv = load_pre_split_data(data_dir, split_pt)
     h5f = h5py.File(out_file, 'w')
     h5f.create_dataset('xt' , shape=(len(xt_filenames),3,256,256), dtype="float32")
     h5f.create_dataset('yt' , shape=(len(yt),), dtype="int32")
@@ -88,9 +82,10 @@ def _write_pre_split_data_to_hdf5_fuel(data_dir, out_file, debug=False):
     for i in range(0, xt_filenames.shape[0]):
         f['image_features'][i] = iterators._load_image_from_filename(xt_filenames[i])
         f['targets'][i] = yt[i]
+    offset = xt_filenames.shape[0]
     for j in range(0, xv_filenames.shape[0]):
-        f['image_features'][i+1+j] = iterators._load_image_from_filename(xv_filenames[i])
-        f['targets'][i] = yv[i]
+        f['image_features'][offset+j] = iterators._load_image_from_filename(xv_filenames[j])
+        f['targets'][offset+j] = yv[j]
     split_dict = {
         'train': {
             'image_features': (0, xt_filenames.shape[0]),
@@ -102,7 +97,25 @@ def _write_pre_split_data_to_hdf5_fuel(data_dir, out_file, debug=False):
     f.attrs['split'] = H5PYDataset.create_split_array(split_dict)
     f.flush()
     f.close()
-
+    
+def _write_pre_split_dummy_data_to_hdf5_fuel(out_file):
+    from fuel.datasets.hdf5 import H5PYDataset
+    import h5py
+    f = h5py.File(out_file, mode='w')
+    n = 20
+    targets = f.create_dataset('targets', (n,n), dtype='float32')
+    for i in range(n):
+        f['targets'][i] = np.eye(n)[i]
+    split_dict = {
+        'train': {
+            'targets': (0, 10)},
+        'test': {
+            'targets': (10,20)}
+        }
+    f.attrs['split'] = H5PYDataset.create_split_array(split_dict)
+    f.flush()
+    f.close()
+    
 def _test_timing():
     from time import time
     import sys
@@ -143,6 +156,20 @@ def load_pre_split_data_into_memory_as_hdf5(dataset_dir):
     import h5py
     h5f = h5py.File(dataset_dir, 'r')
     return h5f['xt'], h5f['yt'], h5f['xv'], h5f['yv']
+
+def load_pre_split_data_into_memory_as_hdf5_fuel(dataset_dir):
+    # HACKY: this will return "train",yt,"valid",yv, i.e.
+    # the X's will be strings, not tensors
+    import h5py
+    from fuel.datasets import H5PYDataset
+    h5f = h5py.File(dataset_dir, 'r')
+    train_set = H5PYDataset(dataset_dir, which_sets=('train',), sources=['targets']) # load labels only!!
+    valid_set = H5PYDataset(dataset_dir, which_sets=('test',), sources=['targets']) # load labels only!!
+    train_handle = train_set.open()
+    train_data = train_set.get_data(train_handle, slice(0, train_set.num_examples))
+    valid_handle = valid_set.open()
+    valid_data = valid_set.get_data(valid_handle, slice(0, valid_set.num_examples))
+    return "train", train_data[0], "test", valid_data[0] #TODO: change 'test' to 'valid', it requires re-write fuel h5 file
     
 def _test_load_from_memory():
     imgen = ImageDataGenerator(horizontal_flip=True)
@@ -151,12 +178,11 @@ def _test_load_from_memory():
     for xt, yt in it(xt, yt, bs=128, num_classes=5):
         print xt.shape, yt.shape
 
-def _test_hdf5_load():
-    xt, yt, xv, yv = load_pre_split_data_into_memory_as_hdf5("/data/lisatmp4/beckhamc/hdf5/dr.h5")
-    pdb.set_trace()
-    imgen = ImageDataGenerator(horizontal_flip=True)
-    for xt, yt in iterators.iterate_hdf5(imgen=imgen, crop=224)(xt, yt, bs=128, num_classes=5, rnd_state=np.random.RandomState(0)):
-        print xt.shape, yt.shape
+def _test_hdf5_fuel_load():
+    dataset_dir = "/data/lisatmp4/beckhamc/hdf5/dr_fuel_test.h5"
+    xt_string, yt, xv_string, yv = load_pre_split_data_into_memory_as_hdf5_fuel(dataset_dir)
+    for x,y in iterators.iterate_hdf5_fuel(dataset_dir)(xt_string, None, bs=128, num_classes=5, rnd_state=np.random.RandomState(0)):
+        break
         
 #def _test_hdf5_iterator():
     #iterate_hdf5
@@ -167,6 +193,11 @@ if __name__ == '__main__':
     #_test_h5()
     #_write_pre_split_data_to_hdf5("/data/lisatmp4/beckhamc/train-trim-ben-256/", "/data/lisatmp4/beckhamc/hdf5/dr.h5")
     #_test_hdf5_load()
-    _write_pre_split_data_to_hdf5_fuel("/data/lisatmp4/beckhamc/train-trim-ben-256/", "/data/lisatmp4/beckhamc/hdf5/dr_fuel_test.h5", debug=True)
-    
-    
+    #_write_pre_split_data_to_hdf5_fuel("/data/lisatmp4/beckhamc/train-trim-ben-256/", "/data/lisatmp4/beckhamc/hdf5/dr_fuel_test.h5")
+    #_test_hdf5_fuel_load()
+    #_write_pre_split_dummy_data_to_hdf5_fuel("/data/lisatmp4/beckhamc/hdf5/dummy.h5")
+    #import h5py
+    #f = h5py.File("/data/lisatmp4/beckhamc/hdf5/dummy.h5", mode='r')
+    #pdb.set_trace()
+    _write_pre_split_data_to_hdf5("/data/lisatmp4/beckhamc/train-trim-ben-256/", "/data/lisatmp4/beckhamc/hdf5/dr_s0.95.h5", 0.95)
+    #pass

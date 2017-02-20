@@ -6,3 +6,6 @@ get.loess = function(vc, span=0.08) {
   xx = 1:length(vc)
   return(predict(loess(vc ~ xx,span=0.08)))
 }
+
+fig.height=2.1
+fig.width=6
