@@ -174,7 +174,10 @@ def adience_xent_l2_1e4_adam_pre_split():
         iterator_fn=iterators.iterate_filenames(imgen, 224), batch_size=128, num_epochs=100,
         out_dir="output/adience_xent_l2-1e-4_adam_pre_split", save_to="models/adience_xent_l2-1e-4_adam_pre_split", debug=False)
 
-def adience_xent_l2_1e4_sgd_pre_split_hdf5():
+
+# -----------------------------------------------------------
+    
+def adience_xent_l2_1e4_sgd_pre_split_hdf5(mode):
     lasagne.random.set_rng(np.random.RandomState(1))
     #nn = NeuralNet(architectures.resnet.resnet_2x4_adience, num_classes=8, mode="x_ent",
     #               args={"l2":1e-4}, optimiser=nesterov_momentum, optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, debug=True)
@@ -189,10 +192,16 @@ def adience_xent_l2_1e4_sgd_pre_split_hdf5():
     # adience_xent_l2-1e-4_sgd_pre_split_hdf5.modelv1.40.bak
     nn = NeuralNet(architectures.resnet.resnet_2x4_adience, num_classes=8, mode="x_ent",
                    args={"l2":1e-4}, optimiser=nesterov_momentum, optimiser_args={"learning_rate":theano.shared(floatX(0.001)),"momentum":0.9}, debug=True)
-    nn.train(
-        data=datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file),
-        iterator_fn=iterators.iterate_hdf5(imgen, 224), batch_size=128, num_epochs=100,
-        out_dir="output/adience_xent_l2-1e-4_sgd_pre_split_hdf5", save_to="models/adience_xent_l2-1e-4_sgd_pre_split_hdf5", debug=False, resume="models/adience_xent_l2-1e-4_sgd_pre_split_hdf5.modelv1.40.bak")
+    if mode == "train":
+        nn.train(
+            data=datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file),
+            iterator_fn=iterators.iterate_hdf5(imgen, 224), batch_size=128, num_epochs=100,
+            out_dir="output/adience_xent_l2-1e-4_sgd_pre_split_hdf5", save_to="models/adience_xent_l2-1e-4_sgd_pre_split_hdf5", debug=False, resume="models/adience_xent_l2-1e-4_sgd_pre_split_hdf5.modelv1.40.bak")
+    elif mode == "dump_dists":
+        model_name = "adience_xent_l2-1e-4_sgd_pre_split_hdf5.modelv1.60.bak2"
+        nn.load_weights_from("models/%s" % model_name)
+        xt, yt, xv, yv = datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file)
+        nn.dump_dists(xv, yv, iterators.iterate_hdf5(imgen,224), 128, "dists/%s.valid.csv" % model_name)
 
 def adience_pois_t_1_xent_l2_1e4_sgd_pre_split_hdf5(mode):
     lasagne.random.set_rng(np.random.RandomState(1))
@@ -228,20 +237,6 @@ def adience_xent_tau3_l2_1e4_sgd_pre_split_hdf5(mode):
             iterator_fn=iterators.iterate_hdf5(imgen, 224), batch_size=128, num_epochs=100,
             out_dir="output/%s" % name, save_to="models/%s" % name, debug=False)
         
-def adience_pois_scap_t_1_xent_l2_1e4_sgd_pre_split_hdf5(mode):
-    lasagne.random.set_rng(np.random.RandomState(1))
-    nn = NeuralNet(architectures.resnet.resnet_2x4_adience_pois_scap, num_classes=8, mode="x_ent",
-                   args={"l2":1e-4, "tau":1.0, "end_nonlinearity":softplus, "learnable_tau":False}, optimiser=nesterov_momentum, optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, debug=True)
-    imgen = ImageDataGenerator(horizontal_flip=True)
-    dest_file, from_file = "/Tmp/beckhamc/hdf5/adience_256.h5", "/data/lisatmp4/beckhamc/hdf5/adience_256.h5"
-    copy_if_not_exist(dest_file=dest_file, from_file=from_file)
-    name = "adience_pois_scap_t-1_xent_l2-1e-4_sgd_pre_split_hdf5"
-    if mode == "train":
-        nn.train(
-            data=datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file),
-            iterator_fn=iterators.iterate_hdf5(imgen, 224), batch_size=128, num_epochs=100,
-            out_dir="output/%s" % name, save_to="models/%s" % name, debug=False)
-
 def adience_tau_learnsig_xent_l2_1e4_sgd_pre_split_hdf5(mode):
     lasagne.random.set_rng(np.random.RandomState(1))
     nn = NeuralNet(architectures.resnet.resnet_2x4_adience_tau, num_classes=8, mode="x_ent",
@@ -254,10 +249,11 @@ def adience_tau_learnsig_xent_l2_1e4_sgd_pre_split_hdf5(mode):
         nn.train(
             data=datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file),
             iterator_fn=iterators.iterate_hdf5(imgen, 224), batch_size=128, num_epochs=100,
-            out_dir="output/%s" % name, save_to="models/%s" % name, debug=False)
+            out_dir="output/%s" % name, save_to="models/%s" % name, debug=False)        
 
-        
+
 def adience_pois_t_learnsig_xent_l2_1e4_sgd_pre_split_hdf5(mode):
+    print "adience_pois_t_learnsig_xent_l2_1e4_sgd_pre_split_hdf5"
     lasagne.random.set_rng(np.random.RandomState(1))
     nn = NeuralNet(architectures.resnet.resnet_2x4_adience_pois, num_classes=8, mode="x_ent",
                    args={"l2":1e-4, "tau":1.0, "end_nonlinearity":softplus, "tau_mode":"sigm_learnable"}, optimiser=nesterov_momentum, optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, debug=True)
@@ -270,6 +266,12 @@ def adience_pois_t_learnsig_xent_l2_1e4_sgd_pre_split_hdf5(mode):
             data=datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file),
             iterator_fn=iterators.iterate_hdf5(imgen, 224), batch_size=128, num_epochs=100,
             out_dir="output/%s" % name, save_to="models/%s" % name, debug=False)
+    elif mode == "dump_dists":
+        print "**DUMPING DISTS**"
+        model_name = "adience_pois_t-learnsig_xent_l2-1e-4_sgd_pre_split_hdf5.modelv1.100.bak"
+        nn.load_weights_from("models/%s" % model_name)
+        xt, yt, xv, yv = datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file)
+        nn.dump_dists(xv, yv, iterators.iterate_hdf5(imgen,224), 128, "dists/%s.valid.csv" % model_name)
 
 def adience_pois_t_learnsig_emd2_l2_1e4_sgd_pre_split_hdf5(mode):
     lasagne.random.set_rng(np.random.RandomState(1))
@@ -301,7 +303,8 @@ def adience_pois_t_1_emd2_l2_1e4_sgd_pre_split_hdf5(mode):
             data=datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file),
             iterator_fn=iterators.iterate_hdf5(imgen, 224), batch_size=128, num_epochs=100,
             out_dir="output/%s" % name, save_to="models/%s" % name, debug=False)
-        
+
+"""
 def adience_pois_t_5_xent_l2_1e4_sgd_pre_split_hdf5(mode):
     lasagne.random.set_rng(np.random.RandomState(1))
     nn = NeuralNet(architectures.resnet.resnet_2x4_adience_pois, num_classes=8, mode="x_ent",
@@ -315,6 +318,7 @@ def adience_pois_t_5_xent_l2_1e4_sgd_pre_split_hdf5(mode):
             data=datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file),
             iterator_fn=iterators.iterate_hdf5(imgen, 224), batch_size=128, num_epochs=100,
             out_dir="output/%s" % name, save_to="models/%s" % name, debug=False)
+"""
 
 def adience_pois_t_3_xent_l2_1e4_sgd_pre_split_hdf5(mode):
     lasagne.random.set_rng(np.random.RandomState(1))
@@ -374,7 +378,7 @@ def adience_pois_t_0p05_xent_l2_1e4_sgd_pre_split_hdf5(mode):
             out_dir="output/%s" % name, save_to="models/%s" % name, debug=False)
 
 
-        
+"""     
 def adience_exp_l2_1e4_sgd_pre_split_hdf5():
     lasagne.random.set_rng(np.random.RandomState(1))
     #nn = NeuralNet(architectures.resnet.resnet_2x4_adience, num_classes=8, mode="exp",
@@ -394,6 +398,7 @@ def adience_exp_l2_1e4_sgd_pre_split_hdf5():
         out_dir="output/adience_exp_l2-1e-4_sgd_pre_split_hdf5", save_to="models/adience_exp_l2-1e-4_sgd_pre_split_hdf5", debug=False, resume="models/adience_exp_l2-1e-4_sgd_pre_split_hdf5.modelv1.16.bak3")
     
     # adience_exp_l2-1e-4_sgd_pre_split_hdf5.modelv1.16.bak3
+"""
 
 def adience_emd2_l2_1e4_sgd_pre_split_hdf5():
     lasagne.random.set_rng(np.random.RandomState(1))

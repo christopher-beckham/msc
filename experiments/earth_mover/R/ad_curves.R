@@ -1,6 +1,6 @@
 source("helpers.R")
 
-afx =read.csv("~/Desktop/lisa_tmp4_4/msc/experiments/earth_mover/output/adience_xent_l2-1e-4_adam_pre_split/results.txt")
+afx =read.csv("~/Desktop/lisa_tmp4_4/msc/experiments/earth_mover/output/adience_xent_l2-1e-4_sgd_pre_split_hdf5/results.txt")[1:100,]
 
 afemd2.t1.0 = read.csv("~/Desktop/lisa_tmp4_4/msc/experiments/earth_mover/output/adience_pois_t-1_emd2_l2-1e-4_sgd_pre_split_hdf5/results.txt")
 

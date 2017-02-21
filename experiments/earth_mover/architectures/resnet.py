@@ -124,6 +124,12 @@ def resnet_2x4_adience(args):
     layer = DenseLayer(layer, num_units=8, nonlinearity=softmax)
     return layer
 
+def resnet_2x4_adience_test1(args):
+    layer = InputLayer((None,3,224,224))
+    layer = _resnet_2x4(layer)
+    layer = DenseLayer(layer, num_units=1, nonlinearity=softmax)
+    return layer
+
 def resnet_2x4_adience_tau(args):
     layer = InputLayer((None,3,224,224))
     layer = _resnet_2x4(layer)
@@ -179,6 +185,7 @@ if __name__ == '__main__':
     #for layer in get_all_layers(l_out):
     #    print layer, "", layer.output_shape
 
+    """
     from lasagne.utils import floatX
     import sys
     sys.path.append("..")
@@ -190,3 +197,26 @@ if __name__ == '__main__':
 
     inp = np.asarray([[10.0,5.0],[20.0,10.0]])
     print get_output(l_tau,X).eval({X:inp.astype("float32")})
+    """
+
+    """
+    l_out_1 = resnet_2x4_adience({})
+    l_out_2 = resnet_2x4_adience_test1({})
+    l_out_3 = resnet_2x4_adience_pois({"tau":1.0, "tau_mode":"non_learnable", "end_nonlinearity":lasagne.nonlinearities.softplus})
+
+    print "resnet adience (8 classes):", count_params(l_out_1, trainable=True)
+    print "resnet adience (1 class test):", count_params(l_out_2, trainable=True)
+    print "resnet adience (8 classes) (pois extension not learning tau):", count_params(l_out_3,trainable=True)
+
+    assert count_params(l_out_2, trainable=True) == count_params(l_out_3,trainable=True)
+    """
+
+    l_out_1 = resnet_2x4_dr({})
+    l_out_2 = resnet_2x4_adience_test1({}) # same
+    l_out_3 = resnet_2x4_dr_pois({"tau":1.0, "tau_mode":"non_learnable", "end_nonlinearity":lasagne.nonlinearities.softplus})
+
+    print "resnet dr (1 classes):", count_params(l_out_1, trainable=True)
+    print "resnet dr (1 class test):", count_params(l_out_2, trainable=True)
+    print "resnet dr (1 classes) (pois extension not learning tau):", count_params(l_out_3,trainable=True)
+
+    assert count_params(l_out_2, trainable=True) == count_params(l_out_3,trainable=True)
