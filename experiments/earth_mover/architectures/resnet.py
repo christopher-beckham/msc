@@ -97,24 +97,52 @@ def _resnet_2x4(l_in, nf=[32, 64, 128, 256], N=2):
     layer = FlattenLayer(layer)
     return layer
 
+class DivLayer(MergeLayer):
+    def __init__(self, incomings, **kwargs):
+        super(DivLayer, self).__init__(incomings, **kwargs)
+
+    def get_output_shape_for(self, input_shapes):
+        return self.input_shapes[0]
+
+    def get_output_for(self, inputs, **kwargs):
+        numerator, denominator = inputs
+        return numerator / denominator
+
 def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode="non_learnable"):
-    assert tau_mode in ["learnable", "non_learnable", "sigm_learnable"]
+    """
+    :tau_mode:
+     learnable = we learn tau directly (but it is the same for all inputs)
+     sigm_learnable = we learn tau inside a sigmoid (but it is the same for all inputs)
+     unlearnable = tau is fixed (obviously, the same for all inputs)
+     fn_learnable = we learn a function sigm(T(x)) (changes depending on x)
+    """
+    assert tau_mode in ["learnable", "non_learnable", "sigm_learnable", "fn_learnable"]
     from scipy.misc import factorial
-    layer = DenseLayer(layer, num_units=1, nonlinearity=end_nonlinearity)
-    l_copy = DenseLayer(layer, num_units=num_classes, nonlinearity=linear)
+    #layer.name = "avg_pool"
+    l_fx = DenseLayer(layer, num_units=1, nonlinearity=end_nonlinearity)
+    l_copy = DenseLayer(l_fx, num_units=num_classes, nonlinearity=linear)
     l_copy.W.set_value( np.ones((1,num_classes)).astype("float32") )
     _remove_trainable(l_copy)
+    c = np.asarray([[(i+1) for i in range(0, num_classes)]], dtype="float32")
+    cf = factorial(c)
     if tau_mode == "non_learnable":
         l_pois = ExpressionLayer(l_copy, lambda x: ((c*T.log(x)) - x - T.log(cf)) / tau )
-    else:
+    elif tau_mode in ["learnable", "sigm_learnable"]:
         l_pois = ExpressionLayer(l_copy, lambda x: ((c*T.log(x)) - x - T.log(cf)) )
         if tau_mode == "learnable":
             fn = linear
         elif tau_mode == "sigm_learnable":
             fn = sigmoid
         l_pois = TauLayer(l_pois, tau=lasagne.init.Constant(tau), bias=0., nonlinearity=fn)
-    c = np.asarray([[(i+1) for i in range(0, num_classes)]], dtype="float32")
-    cf = factorial(c)
+    elif tau_mode == "fn_learnable":
+        l_exp = ExpressionLayer(l_copy, lambda x: ((c*T.log(x)) - x - T.log(cf)))
+        # this is the T(x) layer that we learn
+        l_tau_pre = DenseLayer(layer, num_units=num_classes, nonlinearity=softplus) # TEST
+        l_tau = ExpressionLayer(l_tau_pre, lambda x: 1.0 / (1.0 + x))
+        l_tau.name = "tau_fn"
+        # then we compute h(x) / T(x)
+        l_div = DivLayer((l_exp,l_tau))
+        l_pois = l_div
     l_softmax = NonlinearityLayer(l_pois, nonlinearity=softmax)
     return l_softmax
 
@@ -211,6 +239,7 @@ if __name__ == '__main__':
     assert count_params(l_out_2, trainable=True) == count_params(l_out_3,trainable=True)
     """
 
+    """
     l_out_1 = resnet_2x4_dr({})
     l_out_2 = resnet_2x4_adience_test1({}) # same
     l_out_3 = resnet_2x4_dr_pois({"tau":1.0, "tau_mode":"non_learnable", "end_nonlinearity":lasagne.nonlinearities.softplus})
@@ -220,3 +249,6 @@ if __name__ == '__main__':
     print "resnet dr (1 classes) (pois extension not learning tau):", count_params(l_out_3,trainable=True)
 
     assert count_params(l_out_2, trainable=True) == count_params(l_out_3,trainable=True)
+    """
+
+    pass

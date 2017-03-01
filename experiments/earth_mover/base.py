@@ -40,16 +40,16 @@ class NeuralNet():
         mat = np.asarray([[i] for i in range(self.num_classes)]).astype("float32")
         l_exp.W.set_value(mat)
         return l_exp
-
+    
     def _pmf_to_sq_err(self, l_out):
         def sigm_scaled_nonlinearity(x):
             return sigmoid(x)*(self.num_classes-1)
-        l_exp = DenseLayer(l_out, num_units=1, nonlinearity=sigm_scaled_nonlinearity)
-        pass
+        l_sq = DenseLayer(l_out, num_units=1, nonlinearity=sigm_scaled_nonlinearity)
+        return l_sq
 
     def __init__(self, net_fn, num_classes, optimiser=nesterov_momentum,
                      optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, mode="x_ent", args={}, debug=False):
-        assert mode in ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk"]
+        assert mode in ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk", "sq_err"]
         self.num_classes = num_classes
         self.learning_rate = optimiser_args["learning_rate"]
         self.debug = debug
@@ -58,7 +58,11 @@ class NeuralNet():
         if self.debug:
             self.print_network(self.l_out)
         self.l_out_cum = self._pmf_to_cmf(self.l_out)
-        self.l_out_exp = self._pmf_to_exp(self.l_out)
+        if mode != "sq_err":
+            self.l_out_exp = self._pmf_to_exp(self.l_out)
+        else:
+            self.l_out_exp = self._pmf_to_sq_err(self.l_out)
+        #self.l_out_sq = self._pmf_to_sq_err(self.l_out)
         self.l_in = get_all_layers(self.l_out)[0]
         self.l_out_endpt = None
         # theano variables
@@ -108,6 +112,11 @@ class NeuralNet():
                 print "train_loss: exp"
             train_loss = squared_error(self.net_out_exp, y_int.dimshuffle(0,'x')).mean()
             self.l_out_endpt = self.l_out_exp
+        elif mode == "sq_err":
+            if self.debug:
+                print "train_loss: sq_err"
+            train_loss = squared_error(self.net_out_sq, y_int.dimshuffle(0,'x')).mean()
+            self.l_out_endpt = self.l_out_exp
         elif mode == "qwk":
             if self.debug:
                 print "train_loss: qwk"
@@ -116,6 +125,12 @@ class NeuralNet():
         if "l2" in args:
             print "applying l2: %f" % args["l2"]
             train_loss += args["l2"]*regularize_network_params(self.l_out, l2)
+
+        # get monitors
+        monitors = {}
+        for layer in get_all_layers(self.l_out_endpt):
+            if layer.name != None:
+                monitors[layer.name] = theano.function([X], get_output(layer, X))
         loss_xent = categorical_crossentropy(self.net_out_det, y).mean()
         loss_emd = squared_error(self.net_out_cum_det, y_cum).mean()
         grads = T.grad(train_loss, self.params)
@@ -133,6 +148,7 @@ class NeuralNet():
             "emd_fn": emd_fn,
             "dists_fn": dists_fn
         }
+        self.monitors = monitors
 
     def load_weights_from(self, filename):
         with open(filename) as g:
@@ -157,7 +173,8 @@ class NeuralNet():
         """
         pass
 
-    def train(self, data, iterator_fn, batch_size, num_epochs, out_dir, schedule={}, resume=None, save_every=1, save_to=None, rnd_state=np.random.RandomState(0), debug=False):
+    def train(self, data, iterator_fn, batch_size, num_epochs, out_dir, schedule={}, resume=None, save_every=1, save_to=None,
+              rnd_state=np.random.RandomState(0), debug=False):
         assert save_every >= 1
         header = ["epoch",
                   "train_loss",
@@ -175,9 +192,12 @@ class NeuralNet():
         # initialise log files
         fs = {}
         fs["f_out_file"] = self._create_results_file(out_dir, "results", True if resume != None else False)
-        fs["f_train_loss"] = self._create_results_file(out_dir, "train_loss", True if resume != None else False)
-        fs["f_train_xent"] = self._create_results_file(out_dir, "train_xent", True if resume != None else False)
-        fs["f_valid_xent"] = self._create_results_file(out_dir, "valid_xent", True if resume != None else False)
+        #fs["f_train_loss"] = self._create_results_file(out_dir, "train_loss", True if resume != None else False)
+        #fs["f_train_xent"] = self._create_results_file(out_dir, "train_xent", True if resume != None else False)
+        #fs["f_valid_xent"] = self._create_results_file(out_dir, "valid_xent", True if resume != None else False)
+        fs_monitors = {}
+        for key in self.monitors:
+            fs_monitors[key] = self._create_results_file(out_dir, key, True if resume != None else False)
         if resume != None:
             print "loading weights from: %s" % resume
             self.load_weights_from(resume)
@@ -198,8 +218,10 @@ class NeuralNet():
                 mb_t0 = time()
                 t1, t2 = train_fn(Xb, yb, yb_ord, yb_cum, yb_int, yb_soft)
                 mb_time.append( time()-mb_t0 )
-                train_losses.append(t1); fs["f_train_loss"].write("%f\n" % t1)
-                train_xent_losses.append(t2); fs["f_train_xent"].write("%f\n" % t2)
+                train_losses.append(t1); #fs["f_train_loss"].write("%f\n" % t1)
+                train_xent_losses.append(t2); #fs["f_train_xent"].write("%f\n" % t2)
+                for key in fs_monitors:
+                    fs_monitors[key].write("%s\n" % self.monitors[key](Xb).flatten().tolist())
                 if debug:
                     break
             valid_losses, valid_xent_losses, valid_emd_losses, valid_xent_correct, valid_exp_correct, valid_xent_preds, valid_exp_preds = \
@@ -208,7 +230,7 @@ class NeuralNet():
                 yb_ord, yb_cum, yb_int, yb_soft = \
                     helpers.one_hot_to_ord(yb), helpers.one_hot_to_cmf(yb), helpers.one_hot_to_label(yb), helpers.one_hot_to_soft(yb,self.y_soft_sigma)
                 valid_losses.append( loss_fn(Xb, yb, yb_ord, yb_cum, yb_int, yb_soft) )
-                valid_xent_losses.append( xent_fn(Xb, yb) ); fs["f_valid_xent"].write("%f\n" % valid_xent_losses[-1])
+                valid_xent_losses.append( xent_fn(Xb, yb) ); #fs["f_valid_xent"].write("%f\n" % valid_xent_losses[-1])
                 valid_emd_losses.append( emd_fn(Xb, yb_cum) )
                 d_xent, d_cum, d_exp = dists_fn(Xb)
                 #pdb.set_trace()
@@ -240,6 +262,8 @@ class NeuralNet():
             print to_write
             for key in fs:
                 fs[key].flush()
+            for key in fs_monitors:
+                fs_monitors[key].flush()
             if save_to != None:
                 if epoch % save_every == 0:
                     self.save_weights_to("%s.modelv1.%i" % (save_to, epoch + 1))

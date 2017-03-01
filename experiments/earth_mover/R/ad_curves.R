@@ -134,4 +134,28 @@ ad.curves.3("valid_xent_qwk", "valid qwk", "bottomright")
 
 dev.off()
 
+# --------
 
+tmp = read.csv("~/Desktop/lisa_tmp4_4/msc/experiments/earth_mover/output/adience_pois_t-learnsigfn_xent_l2-1e-4_sgd_pre_split_hdf5_repeat/results.txt")
+tmp2 = read.csv("~/Desktop/lisa_tmp4_4/msc/experiments/earth_mover/output/adience_pois_t-0.125_xent_l2-1e-4_sgd_pre_split_hdf5/results.txt")
+
+
+par(mfrow=c(1,1))
+
+plot(afx$valid_xent,type="l")
+lines(tmp$valid_xent,col="red")
+
+plot(afx$valid_xent_accuracy,type="l",xlim=c(0,200))
+lines(afx.pois.t0.3$valid_xent_accuracy,col="brown")
+lines(tmp2$valid_xent_accuracy,col="green")
+lines(tmp$valid_xent_accuracy,col="red")
+
+plot(afx$valid_xent_qwk,type="l",xlim=c(0,200))
+lines(tmp2$valid_xent_qwk,col="green")
+lines(tmp$valid_xent_qwk,col="red")
+
+
+plot(afx$valid_exp_accuracy,type="l",xlim=c(0,200))
+lines(afx.pois.t0.3$valid_exp_accuracy,col="brown")
+lines(tmp2$valid_exp_accuracy,col="green")
+lines(tmp$valid_exp_accuracy,col="red")
