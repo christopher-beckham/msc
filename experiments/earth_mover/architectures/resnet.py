@@ -120,6 +120,7 @@ def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode="non_learnable
     from scipy.misc import factorial
     #layer.name = "avg_pool"
     l_fx = DenseLayer(layer, num_units=1, nonlinearity=end_nonlinearity)
+    l_fx.tag = "fx"
     l_copy = DenseLayer(l_fx, num_units=num_classes, nonlinearity=linear)
     l_copy.W.set_value( np.ones((1,num_classes)).astype("float32") )
     _remove_trainable(l_copy)

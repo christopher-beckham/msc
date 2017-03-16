@@ -72,6 +72,12 @@ def qwk(predictions, targets, num_classes=5):
     qwk = (T.sum(numerator*w) / T.sum(denominator*w))
     return qwk
 
+def qwk_reform(predictions, targets):
+    num = 2*T.dot(targets,predictions) - 2*predictions.shape[0]*T.mean(predictions)*T.mean(targets)
+    den = T.dot(targets, targets.dimshuffle(0,'x')) + T.dot(predictions.T, predictions) - (2*predictions.shape[0]*T.mean(targets)*T.mean(predictions))
+    #return num/den
+    return (num / den).mean() # mean() is a hack
+
 def weighted_kappa(human_rater, actual_rater, num_classes=5):
     assert len(human_rater) == len(actual_rater)
     def sum_matrix(X, Y):

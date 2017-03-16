@@ -41,114 +41,234 @@ class NeuralNet():
         l_exp.W.set_value(mat)
         return l_exp
     
-    def _pmf_to_sq_err(self, l_out):
+    def _pmf_to_sq_err(self, l_out, is_classic):
         def sigm_scaled_nonlinearity(x):
             return sigmoid(x)*(self.num_classes-1)
-        l_sq = DenseLayer(l_out, num_units=1, nonlinearity=sigm_scaled_nonlinearity)
+        if is_classic:
+            actn = sigm_scaled_nonlinearity
+        else:
+            actn = linear
+        l_sq = DenseLayer(l_out, num_units=1, nonlinearity=actn)
         return l_sq
 
+    """
+    def _get_mode(mode, l_out, ys):
+        #:mode: what mode are we training in
+        #:l_out: this is a probability distribution layer
+        #:ys: this is a tuple of symbolic y values, e.g. y, y_ord, y_cum, etc...
+        #:returns: each inner function modifies a dict of the form (which gets returned by the outer function):
+        #  train_loss: training loss expression to minimise
+        #  xent_loss: x-entropy loss expression (not deterministic)
+        #  dists: returns expressions for probability dist and exp dist (deterministic)
+        #  last_layer: the very last layer, for model saving
+        assert l_out.nonlinearity == softmax
+        return_dict = {"train_loss":None, "xent_loss":None, "dists":None, "last_layer":None}
+        y, y_ord, y_cum, y_int, y_soft = ys
+        def x_ent():
+            if self.debug:
+                print "train_loss: xent"
+            dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True) # p(y|x)
+            l_exp = self._pmf_to_exp(l_out)
+            exp_out, exp_out_det = get_output(l_exp, X), get_output(l_exp, X, deterministic=True) # p(c|x)
+            train_loss = categorical_crossentropy(dist_out, y).mean()
+            loss_xent = train_loss
+            return_dict["train_loss"] = train_loss
+            return_dict["xent_loss"] = loss_xent
+            return_dict["dists"] = [dist_out_det, exp_out_det]
+            return_dict["last_layer"] = l_out
+        def emd2():
+            if self.debug:
+                print "train_loss: emd2"
+            l_out_cum = self._pmf_to_cmf(l_out)
+            net_out_cum, net_out_cum_det = get_output(l_out_cum, X), get_output(l_out_cum, X, deterministic=True) # cumulative p(y|x)
+            train_loss = squared_error(net_out_cum, y_cum).sum(axis=1).mean()
+            dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True) # p(y|x)
+            l_exp = self._pmf_to_exp(l_out)
+            exp_out, exp_out_det = get_output(l_exp, X), get_output(l_exp, X, deterministic=True) # p(c|x)
+            return_dict["train_loss"] = train_loss
+            return_dict["xent_loss"] = categorical_crossentropy(dist_out, y).mean()
+            return_dict["dists"] = [dist_out_det, exp_out_det]
+            return_dict["last_layer"] = l_out_cum
+        def exp():
+            if self.debug:
+                print "train_loss: exp"
+            l_out_exp = self._pmf_to_exp(l_out)
+            net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
+            train_loss = squared_error(net_out_exp, y_int.dimshuffle(0,'x')).mean()
+            dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
+            dists_fn = theano.function([X], [dist_out_det, net_out_exp_det])
+            return_dict["train_loss"] = train_loss
+            return_dict["xent_loss"] = categorical_crossentropy(dist_out, y).mean()
+            return_dict["dists"] = [dist_out_det, exp_out_det]
+            return_dict["last_layer"] = l_out_exp        
+            
+        fn_to_return = {
+            "x_ent": x_ent,
+            "emd2":emd2,
+            "exp":exp
+        }
+        fn_to_return[mode]()
+        
+        for key in return_dict:
+            assert return_dict[key] != None
+
+        return return_dict
+    """
+        
     def __init__(self, net_fn, num_classes, optimiser=nesterov_momentum,
                      optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, mode="x_ent", args={}, debug=False):
-        assert mode in ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk", "sq_err","qwk_reform","qwk_reform_learn"]
+        assert mode in ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk", "sq_err", "sq_err_classic", "qwk_reform", "qwk_reform_classic"]
         self.num_classes = num_classes
         self.learning_rate = optimiser_args["learning_rate"]
         self.debug = debug
-        # network inputs/outputs
-        self.l_out = net_fn(args)
+        # this MUST return a probability distribution of some sort, even
+        # if it's a dummy distribution
+        l_out = net_fn(args)
+        assert l_out.output_shape[-1] == self.num_classes
         if self.debug:
-            self.print_network(self.l_out)
-        self.l_out_cum = self._pmf_to_cmf(self.l_out)
-        if mode in ["sq_err", "qwk_reform_learn"]:
-            self.l_out_exp = self._pmf_to_sq_err(self.l_out)
-        else:
-            self.l_out_exp = self._pmf_to_exp(self.l_out)
-        self.l_in = get_all_layers(self.l_out)[0]
+            self.print_network(l_out)
+        self.l_in = get_all_layers(l_out)[0]
         self.l_out_endpt = None
         # theano variables
         X = T.tensor4('X'); self.input_tensor = X
         y = T.fmatrix('y')
+        # TODO: this is not very clean
         y_ord, y_cum, y_int, y_soft = T.fmatrix('y_ord'), T.fmatrix('y_cum'), T.ivector('y_int'), T.fmatrix('y_soft')
         self.y_soft_sigma = 1.
         # ---
-        self.params = get_all_params(self.l_out, trainable=True)
+        self.params = get_all_params(l_out, trainable=True)
         if self.debug:
             print "params: ", self.params
-        # TODO: put these in a dict??
-        self.net_out, self.net_out_cum, self.net_out_exp = \
-            get_output([self.l_out, self.l_out_cum, self.l_out_exp], {self.l_in: X})
-        self.net_out_det, self.net_out_cum_det, self.net_out_exp_det, = \
-            get_output([self.l_out, self.l_out_cum, self.l_out_exp], {self.l_in: X}, deterministic=True)
         if mode == "x_ent":
             if self.debug:
                 print "train_loss: x_ent"
-            train_loss = categorical_crossentropy(self.net_out, y).mean()
-            self.l_out_endpt = self.l_out
+            dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True) # p(y|x)
+            l_exp = self._pmf_to_exp(l_out)
+            exp_out, exp_out_det = get_output(l_exp, X), get_output(l_exp, X, deterministic=True) # p(c|x)
+            dists_fn = theano.function([X], [dist_out_det, exp_out_det]) # get p(y|x) and p(c|x)
+            train_loss = categorical_crossentropy(dist_out, y).mean()
+            self.l_out_endpt = l_out
         elif mode == "soft":
+            """
             if self.debug:
                 print "train_loss: soft"
             train_loss = categorical_crossentropy(self.net_out, y_soft).mean()
             self.l_out_endpt = self.l_out
             self.y_soft_sigma = args["y_soft_sigma"]
+            """
+            raise NotImplementedError()
         elif mode == "emd2":
             if self.debug:
                 print "train_loss: emd2"
-            train_loss = squared_error(self.net_out_cum, y_cum).sum(axis=1).mean()
-            self.l_out_endpt = self.l_out_cum
+            l_out_cum = self._pmf_to_cmf(l_out)
+            net_out_cum, net_out_cum_det = get_output(l_out_cum, X), get_output(l_out_cum, X, deterministic=True) # cumulative p(y|x)
+            train_loss = squared_error(net_out_cum, y_cum).sum(axis=1).mean()
+            dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True) # p(y|x)
+            l_exp = self._pmf_to_exp(l_out)
+            exp_out, exp_out_det = get_output(l_exp, X), get_output(l_exp, X, deterministic=True) # p(c|x)
+            dists_fn = theano.function([X], [dist_out_det, exp_out_det]) # get p(y|x) and p(c|x)
+            self.l_out_endpt = l_out_cum
         elif mode == "emd22":
+            """
             if self.debug:
                 print "train_loss: emd22"
             train_loss = (squared_error(self.net_out_cum, y_cum).sum(axis=1)**2).mean()
             self.l_out_endpt = self.l_out_cum
+            """
+            raise NotImplementedError()
         elif mode == "xemd2":
+            """
             if self.debug:
                 print "train_loss: x-ent + emd2"
             assert "emd2_lambda" in args
             train_loss = categorical_crossentropy(self.net_out, y).mean() + \
               args["emd2_lambda"]*squared_error(self.net_out_cum, y_cum).sum(axis=1).mean()
             self.l_out_endpt = self.l_out_cum
+            """
+            raise NotImplementedError()
         elif mode == "exp":
             if self.debug:
                 print "train_loss: exp"
-            train_loss = squared_error(self.net_out_exp, y_int.dimshuffle(0,'x')).mean()
-            self.l_out_endpt = self.l_out_exp
-        elif mode == "sq_err":
+            l_out_exp = self._pmf_to_exp(l_out)
+            net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
+            train_loss = squared_error(net_out_exp, y_int.dimshuffle(0,'x')).mean()
+            dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
+            dists_fn = theano.function([X], [dist_out_det, net_out_exp_det])
+            self.l_out_endpt = l_out_exp
+        elif mode in ["sq_err", "sq_err_classic"]:
             if self.debug:
-                print "train_loss: sq_err"
-            train_loss = squared_error(self.net_out_exp, y_int.dimshuffle(0,'x')).mean()
-            self.l_out_endpt = self.l_out_exp
-        elif mode == "qwk":
+                print "train_loss: %s" % mode
+            is_classic = True if mode == "sq_err_classic" else False
+            l_out_exp = self._pmf_to_sq_err(l_out, is_classic)
+            net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
+            train_loss = squared_error(net_out_exp, y_int.dimshuffle(0,'x')).mean()
+            dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
+            dists_fn = theano.function([X], [dist_out_det, net_out_exp_det])
+            self.l_out_endpt = l_out_exp
+        elif mode == "sq_err_fx":
+            # TODO: FIXXXX
+            # HACKY: this applies squared_error to a layer before l_out
+            # whose tag is 'fx'. This was intended to applied in
+            # conjunction with the Poisson extension
+            if self.debug:
+                print "train_loss: sq_err_fx"
+            l_fx = None
+            for layer in get_all_layers(l_out)[::-1]:
+                if layer.tag == "fx":
+                    l_fx = layer
+                    break
+            net_out_fx, net_out_fx_det = get_output(l_fx, X), get_output(l_fx, X, deterministic=True)
+            #l_out_exp = self._pmf_to_sq_err(l_out)
+            #net_out_exp = get_output(l_out_exp, X, deterministic=True)
+            net_out_exp = net_out_fx
+            train_loss = squared_error(net_out_fx, y_int.dimshuffle(0,'x')).mean()
+            dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
+            dists_fn = theano.function([X], [dist_out_det, net_out_fx_det])
+            self.l_out_endpt = l_out
+        elif mode == "qwk":            
             if self.debug:
                 print "train_loss: qwk"
-            train_loss = helpers.qwk(self.net_out, y, num_classes=self.num_classes)
-            self.l_out_endpt = self.l_out
-        elif mode == "qwk_reform":
+            l_out_exp = self._pmf_to_exp(l_out)
+            net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
+            dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
+            train_loss = helpers.qwk(dist_out, y, num_classes=self.num_classes)
+            dists_fn = theano.function([X], [dist_out_det, net_out_exp_det])
+            self.l_out_endpt = l_out
+        elif mode in ["qwk_reform", "qwk_reform_classic"]:
+            # qwk_reform = reformulated qwk as a regression, not using sigmoid trick
+            # qwk_reform_classic = "" but using sigmoid trick
             if self.debug:
                 print "train_loss: qwk_reform"
-            train_loss = helpers.qwk_reform(self.net_out_exp, y)
-            self.l_out_endpt = self.l_out_exp
+            is_classic = True if mode == "qwk_reform_classic" else False
+            l_out_exp = self._pmf_to_sq_err(l_out, is_classic)
+            net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
+            # we need to take negative of the kappa
+            train_loss = 1. - helpers.qwk_reform(net_out_exp, y_int)
+            dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
+            dists_fn = theano.function([X], [dist_out_det, net_out_exp_det])
+            self.l_out_endpt = l_out_exp
         if "l2" in args:
             print "applying l2: %f" % args["l2"]
-            train_loss += args["l2"]*regularize_network_params(self.l_out, l2)
+            train_loss += args["l2"]*regularize_network_params(l_out, l2)
         # get monitors
         monitors = {}
         for layer in get_all_layers(self.l_out_endpt):
             if layer.name != None:
                 monitors[layer.name] = theano.function([X], get_output(layer, X))
-        loss_xent = categorical_crossentropy(self.net_out_det, y).mean()
-        loss_emd = squared_error(self.net_out_cum_det, y_cum).mean()
+        loss_xent = categorical_crossentropy(dist_out, y).mean()
+        #loss_emd = squared_error(self.net_out_cum_det, y_cum).mean()
         grads = T.grad(train_loss, self.params)
         updates = optimiser(grads, self.params, **optimiser_args)
         train_fn = theano.function(inputs=[X, y, y_ord, y_cum, y_int, y_soft], outputs=[train_loss, loss_xent], updates=updates,
                                    on_unused_input='warn')
         loss_fn = theano.function(inputs=[X, y, y_ord, y_cum, y_int, y_soft], outputs=train_loss, on_unused_input='warn')
         xent_fn = theano.function(inputs=[X, y], outputs=loss_xent)
-        emd_fn = theano.function(inputs=[X, y_cum], outputs=loss_emd)
-        dists_fn = theano.function(inputs=[X], outputs=[self.net_out_det, self.net_out_cum_det, self.net_out_exp_det])
+        #emd_fn = theano.function(inputs=[X, y_cum], outputs=loss_emd)
+        #dists_fn = theano.function(inputs=[X], outputs=[self.net_out_det, self.net_out_cum_det, self.net_out_exp_det])
         self.fns = {
             "train_fn": train_fn,
             "loss_fn": loss_fn,
             "xent_fn": xent_fn,
-            "emd_fn": emd_fn,
             "dists_fn": dists_fn
         }
         self.monitors = monitors
@@ -184,7 +304,6 @@ class NeuralNet():
                   "train_xent",
                   "valid_loss",
                   "valid_xent",
-                  "valid_emd",
                   "valid_xent_accuracy",
                   "valid_exp_accuracy",
                   "valid_xent_qwk",
@@ -208,8 +327,8 @@ class NeuralNet():
             fs["f_out_file"].write(",".join(header) + "\n")
         print ",".join(header)
         Xt, yt, Xv, yv = data
-        train_fn, loss_fn, xent_fn, emd_fn, dists_fn = \
-                self.fns["train_fn"], self.fns["loss_fn"], self.fns["xent_fn"], self.fns["emd_fn"], self.fns["dists_fn"]
+        train_fn, loss_fn, xent_fn, dists_fn = \
+                self.fns["train_fn"], self.fns["loss_fn"], self.fns["xent_fn"], self.fns["dists_fn"]
         for epoch in range(num_epochs):
             t0 = time()
             if epoch+1 in schedule:
@@ -234,26 +353,25 @@ class NeuralNet():
                     helpers.one_hot_to_ord(yb), helpers.one_hot_to_cmf(yb), helpers.one_hot_to_label(yb), helpers.one_hot_to_soft(yb,self.y_soft_sigma)
                 valid_losses.append( loss_fn(Xb, yb, yb_ord, yb_cum, yb_int, yb_soft) )
                 valid_xent_losses.append( xent_fn(Xb, yb) ); #fs["f_valid_xent"].write("%f\n" % valid_xent_losses[-1])
-                valid_emd_losses.append( emd_fn(Xb, yb_cum) )
-                d_xent, d_cum, d_exp = dists_fn(Xb)
+                #valid_emd_losses.append( emd_fn(Xb, yb_cum) )
+                d_xent, d_exp = dists_fn(Xb)
                 #pdb.set_trace()
                 valid_xent_correct += ( np.argmax(d_xent,axis=1) == yb_int ).tolist()
-                valid_exp_correct += ( np.round(d_exp)[:,0] == yb_int ).tolist()
+                valid_exp_correct += ( np.clip(np.round(d_exp)[:,0], 0, self.num_classes-1) == yb_int ).tolist()
                 #print valid_correct
                 valid_xent_preds += np.argmax(d_xent,axis=1).tolist()
                 valid_exp_preds += [ int(x) for x in np.round(d_exp)[:,0].tolist() ]
                 if debug:
                     break
-            print np.mean(mb_time)
+            #print np.mean(mb_time)
             valid_xent_qwk = helpers.weighted_kappa(actual_rater=yv[:].tolist(), human_rater=valid_xent_preds, num_classes=self.num_classes)
             valid_exp_qwk = helpers.weighted_kappa(actual_rater=yv[:].tolist(), human_rater=valid_exp_preds, num_classes=self.num_classes)
-            to_write = "%i,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f" % \
+            to_write = "%i,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f" % \
                        (epoch+1,
                         np.mean(train_losses),
                         np.mean(train_xent_losses),
                         np.mean(valid_losses),
                         np.mean(valid_xent_losses),
-                        np.mean(valid_emd_losses),
                         np.mean(valid_xent_correct),
                         np.mean(valid_exp_correct),
                         valid_xent_qwk,
