@@ -517,7 +517,7 @@ def adience_qwk_l2_1e4_sgd_pre_split_hdf5(mode):
         nn.train(
             data=datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file),
             iterator_fn=iterators.iterate_hdf5(imgen, 224), batch_size=128, num_epochs=200,
-            out_dir="output/%s" % name, save_to="models/%s" % name, debug=False)
+            out_dir="output/%s" % name, save_to="models/%s" % name, debug=False, resume="models/adience_qwk_l2-1e-4_sgd_pre_split_hdf5.modelv1.200.bak")
         
 
 def adience_qwkreform_classic_l2_1e4_adam_pre_split_hdf5_lr01(mode):
@@ -774,7 +774,7 @@ def dr_emd2_l2_1e4_sgd_pre_split_hdf5():
 
 
 def dr_qwk_l2_1e4_sgd_pre_split_hdf5(mode):
-    lasagne.random.set_rng(np.random.RandomState(1))
+    lasagne.random.set_rng(np.random.RandomState(2))
     nn = NeuralNet(architectures.resnet.resnet_2x4_dr, num_classes=5, mode="qwk",
                    args={"l2":1e-4}, optimiser=nesterov_momentum, optimiser_args={"learning_rate":theano.shared(floatX(0.01)), "momentum":0.9}, debug=True)
     imgen = ImageDataGenerator(rotation_range=359.,width_shift_range=0.05,height_shift_range=0.05,zoom_range=0.02,fill_mode='constant',cval=0.5,horizontal_flip=True,vertical_flip=True)
@@ -784,7 +784,7 @@ def dr_qwk_l2_1e4_sgd_pre_split_hdf5(mode):
         nn.train(
             data=datasets.dr.load_pre_split_data_into_memory_as_hdf5(dest_file),
             iterator_fn=iterators.iterate_hdf5(imgen, 224), batch_size=128, num_epochs=100,
-            out_dir="output/dr_qwk_l2-1e-4_sgd_pre_split_hdf5", save_to="models/dr_qwk_l2-1e-4_sgd_pre_split_hdf5", debug=False, resume="models/dr_qwk_l2-1e-4_sgd_pre_split_hdf5.modelv1.100.bak")
+            out_dir="output/dr_qwk_l2-1e-4_sgd_pre_split_hdf5.2", save_to="models/dr_qwk_l2-1e-4_sgd_pre_split_hdf5.2", debug=False)
 
 def dr_qwkreform_l2_1e4_sgd_pre_split_hdf5(mode):
     lasagne.random.set_rng(np.random.RandomState(1))

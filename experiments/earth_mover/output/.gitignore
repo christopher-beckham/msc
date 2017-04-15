@@ -1,0 +1,4 @@
+train_xent.txt
+valid_xent.txt
+train_loss.txt
+valid_loss.txt

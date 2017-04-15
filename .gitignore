@@ -4,3 +4,4 @@
 *.model
 *fuse_hidden*
 slurm*.out
+*.bak

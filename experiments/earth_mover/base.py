@@ -112,6 +112,8 @@ class NeuralNet():
             train_loss = squared_error(self.net_out_exp, y_int.dimshuffle(0,'x')).mean()
             self.l_out_endpt = self.l_out_exp
         elif mode == "sq_err":
+            # note: same spec as "exp", but earlier in this __init__ method
+            # we use the correct method for sq_error and learn W
             if self.debug:
                 print "train_loss: sq_err"
             train_loss = squared_error(self.net_out_exp, y_int.dimshuffle(0,'x')).mean()
