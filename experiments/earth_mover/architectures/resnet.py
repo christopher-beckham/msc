@@ -147,6 +147,63 @@ def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode="non_learnable
     l_softmax = NonlinearityLayer(l_pois, nonlinearity=softmax)
     return l_softmax
 
+def _add_binom(layer, num_classes):
+    # NOTE: weird bug. so this is numerically unstable when
+    # deterministic=True, but i am unable to reproduce it
+    # outside of using this with my resnet
+    # so: i added eps, and added clip
+    from scipy.special import binom
+    k = num_classes
+    l_sigm = DenseLayer(layer, num_units=1, nonlinearity=sigmoid, W=HeNormal(gain="relu"), b=Constant(0.))
+    l_copy = DenseLayer(l_sigm, num_units=k, nonlinearity=linear)
+    l_copy.W.set_value( np.ones((1,k)).astype("float32") )
+    _remove_trainable(l_copy)
+    c = np.asarray([[(i) for i in range(0, k)]], dtype="float32")
+    binom_coef = binom(k-1, c).astype("float32")
+    ### NOTE: NUMERICALLY UNSTABLE ###
+    eps = 1e-6
+    #l_logf = ExpressionLayer( l_copy, lambda px: (c*T.log(px)) + ((k-1-c)*T.log(1.-px)) )
+    #l_logf = ExpressionLayer(l_logf, lambda px: T.exp(px))
+    #l_logf = ExpressionLayer(l_logf, lambda px: binom_coef*px)
+    l_logf = ExpressionLayer( l_copy, lambda px: T.log(binom_coef) + (c*T.log(px+eps)) + ((k-1-c)*T.log(1.-px+eps)) )
+    l_logf = NonlinearityLayer(l_logf, nonlinearity=softmax)
+    return l_logf
+
+def _add_binom_scap(layer, num_classes):
+    from scipy.special import binom
+    k = num_classes
+    l_pre = DenseLayer(layer, num_units=k, nonlinearity=linear)
+    l_sigm = DenseLayer(l_pre, num_units=1, nonlinearity=sigmoid)
+    l_copy = DenseLayer(l_sigm, num_units=k, nonlinearity=linear)
+    l_copy.W.set_value( np.ones((1,k)).astype("float32") )
+    _remove_trainable(l_copy)
+    c = np.asarray([[(i) for i in range(0, k)]], dtype="float32")
+    binom_coef = binom(k-1, c).astype("float32")
+    ### NOTE: NUMERICALLY UNSTABLE ###
+    eps = 1e-6
+    #l_logf = ExpressionLayer( l_copy, lambda px: (c*T.log(px)) + ((k-1-c)*T.log(1.-px)) )
+    #l_logf = ExpressionLayer(l_logf, lambda px: T.exp(px))
+    #l_logf = ExpressionLayer(l_logf, lambda px: binom_coef*px)
+    l_logf = ExpressionLayer( l_copy, lambda px: T.log(binom_coef) + (c*T.log(px+eps)) + ((k-1-c)*T.log(1.-px+eps)) )
+    l_logf = NonlinearityLayer(l_logf, nonlinearity=softmax)
+    return l_logf
+
+
+#### TEST ####
+def _add_binom_test(layer, num_classes):
+    from scipy.special import binom
+    k = num_classes
+    l_copy = DenseLayer(layer, num_units=k, nonlinearity=linear)
+    l_copy.W.set_value( np.ones((1,k)).astype("float32") )
+    _remove_trainable(l_copy)
+    c = np.asarray([[(i) for i in range(0, k)]], dtype="float32")
+    binom_coef = binom(k-1, c).astype("float32")
+    print binom_coef
+    l_logf = ExpressionLayer( l_copy, lambda px: binom_coef*T.exp( (c*T.log(px)) + ((k-1-c)*T.log(1.-px)) ) )
+    #l_explogf = ExpressionLayer(l_logf, lambda x: T.exp(x))
+    return l_logf
+#### TEST ####
+
 def resnet_2x4_adience(args):
     layer = InputLayer((None,3,224,224))
     layer = _resnet_2x4(layer)
@@ -186,6 +243,13 @@ def resnet_2x4_adience_pois_scap(args):
     layer = DenseLayer(layer, num_units=8, nonlinearity=linear)
     layer = _add_pois(layer, end_nonlinearity=args["end_nonlinearity"], num_classes=8, tau=args["tau"], tau_mode=args["tau_mode"])
     return layer
+
+def resnet_2x4_adience_binom(args):
+    layer = InputLayer((None,3,224,224))
+    layer = _resnet_2x4(layer)
+    layer = _add_binom(layer, num_classes=8)
+    return layer
+
 
 def resnet_2x4_dr(args):
     layer = InputLayer((None,3,224,224))
@@ -252,4 +316,11 @@ if __name__ == '__main__':
     assert count_params(l_out_2, trainable=True) == count_params(l_out_3,trainable=True)
     """
 
-    pass
+    l_in = InputLayer((None,1))
+    l_out = _add_binom_test(l_in, num_classes=8)
+    X = T.fmatrix('X')
+    net_out = get_output(l_out, X, deterministic=True)
+    fake_x = np.random.random(size=(100,1))
+    print fake_x
+    pdists = net_out.eval({X:fake_x.astype("float32")})
+    print np.sum(pdists,axis=1) # want all to be == 1.

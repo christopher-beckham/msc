@@ -47,6 +47,10 @@ class NeuralNet():
         l_sq = DenseLayer(l_out, num_units=1, nonlinearity=sigm_scaled_nonlinearity)
         return l_sq
 
+    def _pmf_to_sq_err_classic(self, l_out):
+        l_sq = DenseLayer(l_out, num_units=1, nonlinearity=rectify)
+        return l_sq
+
     def __init__(self, net_fn, num_classes, optimiser=nesterov_momentum,
                      optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, mode="x_ent", args={}, debug=False):
         assert mode in ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk", "sq_err","qwk_reform","qwk_reform_learn"]
