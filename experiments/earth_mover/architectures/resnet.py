@@ -106,6 +106,7 @@ class DivLayer(MergeLayer):
 
     def get_output_for(self, inputs, **kwargs):
         numerator, denominator = inputs
+        denominator = T.addbroadcast(denominator, 1) # in case denom is of shape (bs,1)
         return numerator / denominator
 
 def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode="non_learnable"):
@@ -116,7 +117,10 @@ def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode="non_learnable
      unlearnable = tau is fixed (obviously, the same for all inputs)
      fn_learnable = we learn a function sigm(T(x)) (changes depending on x)
     """
-    assert tau_mode in ["learnable", "non_learnable", "sigm_learnable", "fn_learnable"]
+    assert tau_mode in ["learnable", "non_learnable", "sigm_learnable", "fn_learnable", "fn_learnable_fixed"]
+    if tau_mode == "fn_learnable":
+        raise NotImplementedError("fn_learnable (of as before 18/04/2017) incorrectly learned a tau for " + \
+                                  "every one of the k classes, as opposed to just one tau. Please use fn_learnable_fixed")
     from scipy.misc import factorial
     #layer.name = "avg_pool"
     l_fx = DenseLayer(layer, num_units=1, nonlinearity=end_nonlinearity)
@@ -135,10 +139,10 @@ def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode="non_learnable
         elif tau_mode == "sigm_learnable":
             fn = sigmoid
         l_pois = TauLayer(l_pois, tau=lasagne.init.Constant(tau), bias=0., nonlinearity=fn)
-    elif tau_mode == "fn_learnable":
+    elif tau_mode == "fn_learnable_fixed":
         l_exp = ExpressionLayer(l_copy, lambda x: ((c*T.log(x)) - x - T.log(cf)))
         # this is the T(x) layer that we learn
-        l_tau_pre = DenseLayer(layer, num_units=num_classes, nonlinearity=softplus) # TEST
+        l_tau_pre = DenseLayer(layer, num_units=1, nonlinearity=softplus) # prior to 18/04: num_units=num_classes
         l_tau = ExpressionLayer(l_tau_pre, lambda x: 1.0 / (1.0 + x))
         l_tau.name = "tau_fn"
         # then we compute h(x) / T(x)
@@ -147,7 +151,11 @@ def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode="non_learnable
     l_softmax = NonlinearityLayer(l_pois, nonlinearity=softmax)
     return l_softmax
 
-def _add_binom(layer, num_classes):
+def _add_binom(layer, num_classes, tau, tau_mode):
+    assert tau_mode in ["non_learnable", "sigm_learnable", "fn_learnable", "fn_learnable_fixed"]
+    if tau_mode == "fn_learnable":
+        raise NotImplementedError("fn_learnable (of as before 18/04/2017) incorrectly learned a tau for " + \
+                                  "every one of the k classes, as opposed to just one tau. Please use fn_learnable_fixed")
     # NOTE: weird bug. so this is numerically unstable when
     # deterministic=True, but i am unable to reproduce it
     # outside of using this with my resnet
@@ -162,10 +170,18 @@ def _add_binom(layer, num_classes):
     binom_coef = binom(k-1, c).astype("float32")
     ### NOTE: NUMERICALLY UNSTABLE ###
     eps = 1e-6
-    #l_logf = ExpressionLayer( l_copy, lambda px: (c*T.log(px)) + ((k-1-c)*T.log(1.-px)) )
-    #l_logf = ExpressionLayer(l_logf, lambda px: T.exp(px))
-    #l_logf = ExpressionLayer(l_logf, lambda px: binom_coef*px)
-    l_logf = ExpressionLayer( l_copy, lambda px: T.log(binom_coef) + (c*T.log(px+eps)) + ((k-1-c)*T.log(1.-px+eps)) )
+    l_logf = ExpressionLayer( l_copy, lambda px: (T.log(binom_coef) + (c*T.log(px+eps)) + ((k-1-c)*T.log(1.-px+eps))) )
+    if tau_mode == "non_learnable":
+        if tau != 1:
+            l_logf = ExpressionLayer(l_logf, lambda px: px / tau)
+    else:
+        if tau_mode == "sigm_learnable":
+            l_logf = TauLayer(l_logf, tau=lasagne.init.Constant(tau), bias=0., nonlinearity=sigmoid)
+        elif tau_mode == "fn_learnable_fixed":
+            l_h = DenseLayer(layer, num_units=1, nonlinearity=softplus)
+            l_h = ExpressionLayer(l_h, lambda x: 1.0 / (1.0 + x)) # fc(k)
+            # then we compute h(x) / T(x)
+            l_logf = DivLayer((l_logf,l_tau))        
     l_logf = NonlinearityLayer(l_logf, nonlinearity=softmax)
     return l_logf
 
@@ -244,10 +260,18 @@ def resnet_2x4_adience_pois_scap(args):
     layer = _add_pois(layer, end_nonlinearity=args["end_nonlinearity"], num_classes=8, tau=args["tau"], tau_mode=args["tau_mode"])
     return layer
 
+def resnet_2x4_adience_pois_scap_relu(args):
+    layer = InputLayer((None,3,224,224))
+    layer = _resnet_2x4(layer)
+    layer = DenseLayer(layer, num_units=8, nonlinearity=rectify)
+    layer = _add_pois(layer, end_nonlinearity=args["end_nonlinearity"], num_classes=8, tau=args["tau"], tau_mode=args["tau_mode"])
+    return layer
+
+
 def resnet_2x4_adience_binom(args):
     layer = InputLayer((None,3,224,224))
     layer = _resnet_2x4(layer)
-    layer = _add_binom(layer, num_classes=8)
+    layer = _add_binom(layer, num_classes=8, tau=args["tau"], tau_mode=args["tau_mode"])
     return layer
 
 
@@ -316,6 +340,7 @@ if __name__ == '__main__':
     assert count_params(l_out_2, trainable=True) == count_params(l_out_3,trainable=True)
     """
 
+    """
     l_in = InputLayer((None,1))
     l_out = _add_binom_test(l_in, num_classes=8)
     X = T.fmatrix('X')
@@ -324,3 +349,15 @@ if __name__ == '__main__':
     print fake_x
     pdists = net_out.eval({X:fake_x.astype("float32")})
     print np.sum(pdists,axis=1) # want all to be == 1.
+    """
+
+    l_out_learntau = resnet_2x4_adience_pois({"tau":1.0, "tau_mode":"learnable", "end_nonlinearity":lasagne.nonlinearities.softplus})
+    #l_out_learntaufn = resnet_2x4_adience_pois({"tau":1.0, "tau_mode":"fn_learnable", "end_nonlinearity":lasagne.nonlinearities.softplus}) # disabled for now
+    l_out_learntaufn_fixed = resnet_2x4_adience_pois({"tau":1.0, "tau_mode":"fn_learnable_fixed", "end_nonlinearity":lasagne.nonlinearities.softplus}) # disabled for now    
+    l_out_learntau_scap = resnet_2x4_adience_pois_scap({"tau":1.0, "tau_mode":"learnable", "end_nonlinearity":lasagne.nonlinearities.softplus})
+    l_out_vanilla = resnet_2x4_adience({})
+    
+    print "adience learn tau", count_params(l_out_learntau)
+    print "adience learn tau fn fixed", count_params(l_out_learntaufn_fixed)
+    print "adience learn tau 'scap'", count_params(l_out_learntau_scap)
+    print "adience vanilla", count_params(l_out_vanilla)

@@ -30,7 +30,7 @@ class NeuralNet():
 
     def print_network(self, l_out):
         for layer in get_all_layers(l_out):
-            print layer, layer.output_shape
+            print layer, layer.output_shape, " " if not hasattr(layer, 'nonlinearity') else layer.nonlinearity
 
     def _pmf_to_cmf(self, l_out):
         return layers.UpperRightOnesLayer(l_out)
@@ -117,7 +117,8 @@ class NeuralNet():
         
     def __init__(self, net_fn, num_classes, optimiser=nesterov_momentum,
                      optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, mode="x_ent", args={}, debug=False):
-        assert mode in ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk", "sq_err", "sq_err_classic", "qwk_reform", "qwk_reform_classic"]
+        assert mode in ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk", "sq_err", "sq_err_classic", "qwk_reform", "qwk_reform_classic", "sq_err_backrelu", "sq_err_fx"]
+        #TODO: clean backrelu
         self.num_classes = num_classes
         self.learning_rate = optimiser_args["learning_rate"]
         self.debug = debug
@@ -148,6 +149,7 @@ class NeuralNet():
             dists_fn = theano.function([X], [dist_out_det, exp_out_det]) # get p(y|x) and p(c|x)
             train_loss = categorical_crossentropy(dist_out, y).mean()
             self.l_out_endpt = l_out
+            #self.tmp_fn = theano.function([X], get_output([l_out, l_out.input_layer, l_out.input_layer.input_layer, l_out.input_layer.input_layer.input_layer], X, deterministic=True))
         elif mode == "soft":
             """
             if self.debug:
@@ -195,10 +197,15 @@ class NeuralNet():
             dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
             dists_fn = theano.function([X], [dist_out_det, net_out_exp_det])
             self.l_out_endpt = l_out_exp
-        elif mode in ["sq_err", "sq_err_classic"]:
+        elif mode in ["sq_err", "sq_err_backrelu", "sq_err_classic"]:
+            # sq_err = softmax hidden layer, linear exp layer
+            # sq_err_classic = softmax hidden layer, scaled sigm exp layer
+            # sq_err_backrelu = relu hidden layer, linear exp layer
             if self.debug:
                 print "train_loss: %s" % mode
             is_classic = True if mode == "sq_err_classic" else False
+            if mode == "sq_err_backrelu":
+                l_out.nonlinearity = rectify
             l_out_exp = self._pmf_to_sq_err(l_out, is_classic)
             net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
             train_loss = squared_error(net_out_exp, y_int.dimshuffle(0,'x')).mean()
@@ -214,9 +221,11 @@ class NeuralNet():
                 print "train_loss: sq_err_fx"
             l_fx = None
             for layer in get_all_layers(l_out)[::-1]:
-                if layer.tag == "fx":
+                if hasattr(layer, 'tag') and layer.tag == 'fx':
                     l_fx = layer
                     break
+            if l_fx == None:
+                raise Exception("For sq_err_fx, a layer must have the tag 'fx' associated with it.")
             net_out_fx, net_out_fx_det = get_output(l_fx, X), get_output(l_fx, X, deterministic=True)
             #l_out_exp = self._pmf_to_sq_err(l_out)
             #net_out_exp = get_output(l_out_exp, X, deterministic=True)
@@ -335,6 +344,8 @@ class NeuralNet():
                 self.learning_rate.set_value( floatX(schedule[epoch+1]) )
             train_losses, train_xent_losses, mb_time = [], [], []
             for Xb, yb in iterator_fn(Xt, yt, bs=batch_size, num_classes=self.num_classes, rnd_state=rnd_state):
+                #import pdb
+                #pdb.set_trace()
                 yb_ord, yb_cum, yb_int, yb_soft = \
                     helpers.one_hot_to_ord(yb), helpers.one_hot_to_cmf(yb), helpers.one_hot_to_label(yb), helpers.one_hot_to_soft(yb,self.y_soft_sigma)
                 mb_t0 = time()
@@ -397,7 +408,7 @@ class NeuralNet():
         """
         with open(out_file,"wb") as f:
             for Xb, yb in iterator_fn(X, y, bs=batch_size, num_classes=self.num_classes):
-                dists, _, _ = self.fns["dists_fn"](Xb)
+                dists, _ = self.fns["dists_fn"](Xb)
                 for i, row in enumerate(dists):
                     row = [ str(elem) for elem in row.tolist() ]
                     row.append(str(np.argmax(yb[i])))

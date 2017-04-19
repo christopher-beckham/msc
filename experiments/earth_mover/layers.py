@@ -62,6 +62,10 @@ class OrdinalSubtractLayer(Layer):
         return result
 
 class TauLayer(Layer):
+    """
+    Divide the input by b + g(tau), where b is a pre-specified bias
+    and g is a pre-specified nonlinearity.
+    """
     def __init__(self, incoming, tau, bias=1.0, nonlinearity=linear, **kwargs):
         super(TauLayer, self).__init__(incoming, **kwargs)
         self.tau = self.add_param(tau, (1,), name='tau', regularizable=False)
