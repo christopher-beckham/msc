@@ -70,18 +70,18 @@ def load_all_data(dataset_dir):
     training_y = np.asarray(training_y, dtype="int32")
     return training_X, training_y
 
-def load_pre_split_data(dataset_dir):
+def load_pre_split_data(dataset_dir, split_pt=0.9):
     all_X, all_y = load_all_data(dataset_dir)
     rnd = np.random.RandomState(0)
     idxs = [x for x in range(len(all_y))]
     rnd.shuffle(idxs)
-    train_idxs = idxs[0:int(0.9*len(idxs))]
-    valid_idxs = idxs[int(0.9*len(idxs))::]
+    train_idxs = idxs[0:int(split_pt*len(idxs))]
+    valid_idxs = idxs[int(split_pt*len(idxs))::]
     return all_X[train_idxs], all_y[train_idxs], all_X[valid_idxs], all_y[valid_idxs]
 
-def _write_pre_split_data_to_hdf5(data_dir, out_file):
+def _write_pre_split_data_to_hdf5(data_dir, split_pt, out_file):
     import h5py
-    xt_filenames, yt, xv_filenames, yv = load_pre_split_data(data_dir)
+    xt_filenames, yt, xv_filenames, yv = load_pre_split_data(data_dir, split_pt)
     h5f = h5py.File(out_file, 'w')
     h5f.create_dataset('xt' , shape=(len(xt_filenames),3,256,256), dtype="float32")
     h5f.create_dataset('yt' , shape=(len(yt),), dtype="int32")
@@ -104,7 +104,40 @@ if __name__ == '__main__':
 
     #load_pre_split_data_in_memory("/data/lisatmp4/beckhamc/adience_data/aligned_256x256/")
 
-    _write_pre_split_data_to_hdf5("/data/lisatmp4/beckhamc/adience_data/aligned_256x256/", "/data/lisatmp4/beckhamc/hdf5/adience_256.h5")
+    # 0.9 split
+    #_write_pre_split_data_to_hdf5("/data/lisatmp4/beckhamc/adience_data/aligned_256x256/", "/data/lisatmp4/beckhamc/hdf5/adience_256.h5")
+
+    # 0.5 split
+    #_write_pre_split_data_to_hdf5("/data/lisatmp4/beckhamc/adience_data/aligned_256x256/", 0.5, "/data/lisatmp4/beckhamc/hdf5/adience_256_50-50.h5")
+
+    # 0.25 split
+    #_write_pre_split_data_to_hdf5("/data/lisatmp4/beckhamc/adience_data/aligned_256x256/", 0.25, "/data/lisatmp4/beckhamc/hdf5/adience_256_25-75.h5")
+
+    # 0.10 split
+    #_write_pre_split_data_to_hdf5("/data/lisatmp4/beckhamc/adience_data/aligned_256x256/", 0.1, "/data/lisatmp4/beckhamc/hdf5/adience_256_10-90.h5")
+
+    """
+    # yt statistics for 90-10 split:
+    >>> (yt==0).sum()
+    1818
+    >>> (yt==1).sum()
+    1409
+    >>> (yt==2).sum()
+    1610
+    >>> (yt==3).sum()
+    1288
+    >>> (yt==4).sum()
+    3552
+    >>> (yt==5).sum()
+    1587
+    >>> (yt==6).sum()
+    524
+    >>> (yt==7).sum()
+    557
+    """
+    
+    # intentionally imbalance the class??
+    ##
     
     """
     imgen = ImageDataGenerator()

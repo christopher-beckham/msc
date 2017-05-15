@@ -15,6 +15,7 @@ import layers
 import sys
 import pdb
 import pickle
+from keras_ports import ReduceLROnPlateau
 
 def dummy_net_fn(args):
     layer = InputLayer((None, 1, 28, 28))
@@ -26,6 +27,11 @@ def test_iterator(data, iterator_fn, num_classes):
     for Xb, yb in iterator_fn(Xt, yt, bs=batch_size, num_classes=num_classes):
         yield Xb, yb
 
+def sigm_scaled(k):
+    def fn(x):
+        return sigmoid(x)*(k-1)
+    return fn
+        
 class NeuralNet():
 
     def print_network(self, l_out):
@@ -41,14 +47,8 @@ class NeuralNet():
         l_exp.W.set_value(mat)
         return l_exp
     
-    def _pmf_to_sq_err(self, l_out, is_classic):
-        def sigm_scaled_nonlinearity(x):
-            return sigmoid(x)*(self.num_classes-1)
-        if is_classic:
-            actn = sigm_scaled_nonlinearity
-        else:
-            actn = linear
-        l_sq = DenseLayer(l_out, num_units=1, nonlinearity=actn)
+    def _pmf_to_sq_err(self, l_out, nonlinearity):
+        l_sq = DenseLayer(l_out, num_units=1, nonlinearity=nonlinearity)
         return l_sq
 
     """
@@ -117,7 +117,8 @@ class NeuralNet():
         
     def __init__(self, net_fn, num_classes, optimiser=nesterov_momentum,
                      optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, mode="x_ent", args={}, debug=False):
-        assert mode in ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk", "sq_err", "sq_err_classic", "qwk_reform", "qwk_reform_classic", "sq_err_backrelu", "sq_err_fx"]
+        assert mode in \
+            ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk", "sq_err", "sq_err_classic", "qwk_reform", "qwk_reform_classic", "sq_err_backrelu", "sq_err_classic_backrelu", "sq_err_fx"]
         #TODO: clean backrelu
         self.num_classes = num_classes
         self.learning_rate = optimiser_args["learning_rate"]
@@ -140,9 +141,9 @@ class NeuralNet():
         self.params = get_all_params(l_out, trainable=True)
         if self.debug:
             print "params: ", self.params
+        if self.debug:
+            print "train_loss: %s" % mode
         if mode == "x_ent":
-            if self.debug:
-                print "train_loss: x_ent"
             dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True) # p(y|x)
             l_exp = self._pmf_to_exp(l_out)
             exp_out, exp_out_det = get_output(l_exp, X), get_output(l_exp, X, deterministic=True) # p(c|x)
@@ -160,8 +161,6 @@ class NeuralNet():
             """
             raise NotImplementedError()
         elif mode == "emd2":
-            if self.debug:
-                print "train_loss: emd2"
             l_out_cum = self._pmf_to_cmf(l_out)
             net_out_cum, net_out_cum_det = get_output(l_out_cum, X), get_output(l_out_cum, X, deterministic=True) # cumulative p(y|x)
             train_loss = squared_error(net_out_cum, y_cum).sum(axis=1).mean()
@@ -189,24 +188,23 @@ class NeuralNet():
             """
             raise NotImplementedError()
         elif mode == "exp":
-            if self.debug:
-                print "train_loss: exp"
             l_out_exp = self._pmf_to_exp(l_out)
             net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
             train_loss = squared_error(net_out_exp, y_int.dimshuffle(0,'x')).mean()
             dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
             dists_fn = theano.function([X], [dist_out_det, net_out_exp_det])
             self.l_out_endpt = l_out_exp
-        elif mode in ["sq_err", "sq_err_backrelu", "sq_err_classic"]:
+        elif mode in ["sq_err", "sq_err_backrelu", "sq_err_classic", "sq_err_classic_backrelu"]:
+            # TODO: don't put the relu in the option name, it is kinda unclean
+            
             # sq_err = softmax hidden layer, linear exp layer
             # sq_err_classic = softmax hidden layer, scaled sigm exp layer
             # sq_err_backrelu = relu hidden layer, linear exp layer
-            if self.debug:
-                print "train_loss: %s" % mode
-            is_classic = True if mode == "sq_err_classic" else False
-            if mode == "sq_err_backrelu":
+            # sq_err_classic_backrelu = relu hidden layer, scaled sigm exp layer
+            is_classic = True if "classic" in mode else False
+            if "backrelu" in mode:
                 l_out.nonlinearity = rectify
-            l_out_exp = self._pmf_to_sq_err(l_out, is_classic)
+            l_out_exp = self._pmf_to_sq_err(l_out, nonlinearity=sigm_scaled(self.num_classes) if is_classic else rectify)
             net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
             train_loss = squared_error(net_out_exp, y_int.dimshuffle(0,'x')).mean()
             dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
@@ -217,8 +215,6 @@ class NeuralNet():
             # HACKY: this applies squared_error to a layer before l_out
             # whose tag is 'fx'. This was intended to applied in
             # conjunction with the Poisson extension
-            if self.debug:
-                print "train_loss: sq_err_fx"
             l_fx = None
             for layer in get_all_layers(l_out)[::-1]:
                 if hasattr(layer, 'tag') and layer.tag == 'fx':
@@ -234,9 +230,7 @@ class NeuralNet():
             dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
             dists_fn = theano.function([X], [dist_out_det, net_out_fx_det])
             self.l_out_endpt = l_out
-        elif mode == "qwk":            
-            if self.debug:
-                print "train_loss: qwk"
+        elif mode == "qwk":
             l_out_exp = self._pmf_to_exp(l_out)
             net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
             dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
@@ -246,13 +240,12 @@ class NeuralNet():
         elif mode in ["qwk_reform", "qwk_reform_classic"]:
             # qwk_reform = reformulated qwk as a regression, not using sigmoid trick
             # qwk_reform_classic = "" but using sigmoid trick
-            if self.debug:
-                print "train_loss: qwk_reform"
-            is_classic = True if mode == "qwk_reform_classic" else False
-            l_out_exp = self._pmf_to_sq_err(l_out, is_classic)
+            l_out.nonlinearity = rectify # OVERRIDE nonlinearity
+            l_out_exp = self._pmf_to_sq_err(l_out, nonlinearity=sigm_scaled(self.num_classes) if mode == "qwk_reform_classic" else rectify)
             net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
-            # we need to take negative of the kappa
-            train_loss = 1. - helpers.qwk_reform(net_out_exp, y_int)
+            train_loss = helpers.qwk_reform_fixed(net_out_exp, y_int)
+            self.debug_tps = helpers.qwk_num_denom(net_out_exp, y_int)
+            self.debug_fn = theano.function([X,y_int], self.debug_tps)
             dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
             dists_fn = theano.function([X], [dist_out_det, net_out_exp_det])
             self.l_out_endpt = l_out_exp
@@ -274,6 +267,11 @@ class NeuralNet():
         xent_fn = theano.function(inputs=[X, y], outputs=loss_xent)
         #emd_fn = theano.function(inputs=[X, y_cum], outputs=loss_emd)
         #dists_fn = theano.function(inputs=[X], outputs=[self.net_out_det, self.net_out_cum_det, self.net_out_exp_det])
+        # DEBUG purposes
+        self.train_loss = train_loss
+        self.X = X
+        self.y = y
+        # ----
         self.fns = {
             "train_fn": train_fn,
             "loss_fn": loss_fn,
@@ -306,7 +304,7 @@ class NeuralNet():
         pass
 
     def train(self, data, iterator_fn, batch_size, num_epochs, out_dir, schedule={}, resume=None, save_every=1, save_to=None,
-              rnd_state=np.random.RandomState(0), debug=False):
+              rnd_state=np.random.RandomState(0), reduce_lr_on_plateau=False, debug=False, pdb_debug=False):
         assert save_every >= 1
         header = ["epoch",
                   "train_loss",
@@ -335,21 +333,27 @@ class NeuralNet():
         else:
             fs["f_out_file"].write(",".join(header) + "\n")
         print ",".join(header)
+        print "learning rate schedule:", schedule
         Xt, yt, Xv, yv = data
         train_fn, loss_fn, xent_fn, dists_fn = \
                 self.fns["train_fn"], self.fns["loss_fn"], self.fns["xent_fn"], self.fns["dists_fn"]
+        lr_reducer = ReduceLROnPlateau(self.learning_rate, verbose=1)
+        if reduce_lr_on_plateau:
+            lr_reducer.on_train_begin()
         for epoch in range(num_epochs):
             t0 = time()
             if epoch+1 in schedule:
                 self.learning_rate.set_value( floatX(schedule[epoch+1]) )
             train_losses, train_xent_losses, mb_time = [], [], []
             for Xb, yb in iterator_fn(Xt, yt, bs=batch_size, num_classes=self.num_classes, rnd_state=rnd_state):
-                #import pdb
-                #pdb.set_trace()
                 yb_ord, yb_cum, yb_int, yb_soft = \
                     helpers.one_hot_to_ord(yb), helpers.one_hot_to_cmf(yb), helpers.one_hot_to_label(yb), helpers.one_hot_to_soft(yb,self.y_soft_sigma)
                 mb_t0 = time()
+                if pdb_debug:
+                    import pdb
+                    pdb.set_trace()
                 t1, t2 = train_fn(Xb, yb, yb_ord, yb_cum, yb_int, yb_soft)
+                #print t1
                 mb_time.append( time()-mb_t0 )
                 train_losses.append(t1); #fs["f_train_loss"].write("%f\n" % t1)
                 train_xent_losses.append(t2); #fs["f_train_xent"].write("%f\n" % t2)
@@ -399,6 +403,8 @@ class NeuralNet():
             if save_to != None:
                 if epoch % save_every == 0:
                     self.save_weights_to("%s.modelv1.%i" % (save_to, epoch + 1))
+            if reduce_lr_on_plateau:
+                lr_reducer.on_epoch_end( np.mean(valid_losses), epoch+1 )
 
     def dump_dists(self, X, y, iterator_fn, batch_size, out_file):
         """

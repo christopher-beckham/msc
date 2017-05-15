@@ -70,13 +70,58 @@ def qwk(predictions, targets, num_classes=5):
     denominator = T.outer(targets.sum(axis=0), predictions.sum(axis=0))
     denominator = denominator / T.sum(numerator)
     qwk = (T.sum(numerator*w) / T.sum(denominator*w))
-    return qwk
+    return T.log(qwk)
 
 def qwk_reform(predictions, targets):
-    num = 2*T.dot(targets,predictions) - 2*predictions.shape[0]*T.mean(predictions)*T.mean(targets)
-    den = T.dot(targets, targets.dimshuffle(0,'x')) + T.dot(predictions.T, predictions) - (2*predictions.shape[0]*T.mean(targets)*T.mean(predictions))
-    #return num/den
-    return (num / den).mean() # mean() is a hack
+    num = T.dot(predictions.T+1.,targets+1.) - (T.mean(predictions)*T.mean(targets))
+    denom = T.dot(predictions.T+1.,predictions+1.) + T.dot(targets.T+1.,targets+1.) - (T.mean(predictions)*T.mean(targets))
+    kp = T.log(num / denom)
+    kp = -kp.mean()
+    return kp
+
+def qwk_reform_fixed(x, targets):
+    """
+    WARNING: it is not guaranteed that 2*mu_(x*y) > 2*mu_x*mu_y,
+    so rather than minimise -log(a/b), we have to minimise
+    -log( (a/b) + 1 ) ...
+    """
+    y = targets.dimshuffle(0,'x')
+    num = 2.0*T.mean(x*y) - 2.0*T.mean(x)*T.mean(y)
+    denom = T.mean(x**2) + T.mean(y**2) - 2.0*T.mean(x)*T.mean(y)
+    kp = -T.log( 1. + (num / denom) )
+    #kp = -kp.mean()
+    return kp
+
+def qwk_reform_fixed_plus1(predictions, targets):
+    y = targets.dimshuffle(0,'x') + 1.0
+    x = predictions + 1.0
+    num = 2.0*T.mean(x*y) - 2.0*T.mean(x)*T.mean(y)
+    denom = T.mean(x**2) + T.mean(y**2) - 2.0*T.mean(x)*T.mean(y)
+    kp = -T.log(num / denom)
+    #kp = -kp.mean()
+    return kp
+
+# DEBUG
+
+def qwk_num_denom(predictions, targets):
+    y = targets.dimshuffle(0,'x') + 1.0
+    x = predictions + 1.0
+    num1 = 2.0*T.mean(x*y)
+    num2 = 2.0*T.mean(x)*T.mean(y)
+    num = num1 - num2
+    denom1 = T.mean(x**2)
+    denom2 = T.mean(y**2)
+    denom3 = 2.0*T.mean(x)*T.mean(y)
+    denom = denom1+denom2+denom3
+    return [x,y,num1,num2,num,denom1,denom2,denom3,denom]
+
+
+#numerator = T.dot(net_out.T+1.,y+1.) - T.mean(net_out)*T.mean(y)
+#denominator = (T.dot(net_out.T+1.,net_out+1.) + T.dot(y.T+1.,y+1.)) - T.mean(net_out)*T.mean(y)
+#kappa = numerator / denominator
+#kappa = T.log(kappa)
+#kappa = -kappa.mean()
+#loss = kappa
 
 def weighted_kappa(human_rater, actual_rater, num_classes=5):
     assert len(human_rater) == len(actual_rater)
@@ -117,6 +162,11 @@ def weighted_kappa(human_rater, actual_rater, num_classes=5):
     # compute kappa
     kappa = 1 - (sum_matrix(W, O) / sum_matrix(W, E))
     return kappa
+
+
+# ---------------
+
+
 
 if __name__ == '__main__':
     x = np.asarray([[1,0,0],[0,1,0],[0,0,1]]).astype("float32")

@@ -267,13 +267,13 @@ def resnet_2x4_adience_pois_scap_relu(args):
     layer = _add_pois(layer, end_nonlinearity=args["end_nonlinearity"], num_classes=8, tau=args["tau"], tau_mode=args["tau_mode"])
     return layer
 
-
 def resnet_2x4_adience_binom(args):
     layer = InputLayer((None,3,224,224))
     layer = _resnet_2x4(layer)
     layer = _add_binom(layer, num_classes=8, tau=args["tau"], tau_mode=args["tau_mode"])
     return layer
 
+# -------------------
 
 def resnet_2x4_dr(args):
     layer = InputLayer((None,3,224,224))
@@ -293,6 +293,12 @@ def resnet_2x4_dr_pois(args):
     layer = InputLayer((None,3,224,224))
     layer = _resnet_2x4(layer)
     layer = _add_pois(layer, end_nonlinearity=args["end_nonlinearity"], num_classes=5, tau=args["tau"])
+    return layer
+
+def resnet_2x4_dr_binom(args):
+    layer = InputLayer((None,3,224,224))
+    layer = _resnet_2x4(layer)
+    layer = _add_binom(layer, num_classes=5, tau=args["tau"], tau_mode=args["tau_mode"])
     return layer
     
 if __name__ == '__main__':
