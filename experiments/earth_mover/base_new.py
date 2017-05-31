@@ -127,8 +127,7 @@ class NeuralNet():
         # if it's a dummy distribution
         l_out = net_fn(args)
         assert l_out.output_shape[-1] == self.num_classes
-        if self.debug:
-            self.print_network(l_out)
+        self.print_network(l_out)
         self.l_in = get_all_layers(l_out)[0]
         self.l_out_endpt = None
         # theano variables
@@ -251,12 +250,14 @@ class NeuralNet():
             self.l_out_endpt = l_out_exp
         if "l2" in args:
             print "applying l2: %f" % args["l2"]
+            # BUG: this does not affect the l_exp layer??
             train_loss += args["l2"]*regularize_network_params(l_out, l2)
         # get monitors
         monitors = {}
         for layer in get_all_layers(self.l_out_endpt):
             if layer.name != None:
                 monitors[layer.name] = theano.function([X], get_output(layer, X))
+        print "monitors found:", monitors.keys()
         loss_xent = categorical_crossentropy(dist_out, y).mean()
         #loss_emd = squared_error(self.net_out_cum_det, y_cum).mean()
         grads = T.grad(train_loss, self.params)
@@ -303,8 +304,12 @@ class NeuralNet():
         """
         pass
 
+    def _plot_network(self, l_out, out_file):
+        from nolearn.lasagne.visualize import draw_to_file
+        draw_to_file( get_all_layers(l_out), out_file, verbose=True )
+        
     def train(self, data, iterator_fn, batch_size, num_epochs, out_dir, schedule={}, resume=None, save_every=1, save_to=None,
-              rnd_state=np.random.RandomState(0), reduce_lr_on_plateau=False, debug=False, pdb_debug=False):
+              rnd_state=np.random.RandomState(0), reduce_lr_on_plateau=None, debug=False, pdb_debug=False):
         assert save_every >= 1
         header = ["epoch",
                   "train_loss",
@@ -334,11 +339,13 @@ class NeuralNet():
             fs["f_out_file"].write(",".join(header) + "\n")
         print ",".join(header)
         print "learning rate schedule:", schedule
+        self._plot_network(self.l_out_endpt, "%s/network.png" % out_dir)
         Xt, yt, Xv, yv = data
         train_fn, loss_fn, xent_fn, dists_fn = \
                 self.fns["train_fn"], self.fns["loss_fn"], self.fns["xent_fn"], self.fns["dists_fn"]
         lr_reducer = ReduceLROnPlateau(self.learning_rate, verbose=1)
-        if reduce_lr_on_plateau:
+        if reduce_lr_on_plateau != None:
+            assert reduce_lr_on_plateau in ['valid_loss', 'valid_exp_qwk']
             lr_reducer.on_train_begin()
         for epoch in range(num_epochs):
             t0 = time()
@@ -403,17 +410,25 @@ class NeuralNet():
             if save_to != None:
                 if epoch % save_every == 0:
                     self.save_weights_to("%s.modelv1.%i" % (save_to, epoch + 1))
-            if reduce_lr_on_plateau:
-                lr_reducer.on_epoch_end( np.mean(valid_losses), epoch+1 )
+            if reduce_lr_on_plateau != None:
+                if reduce_lr_on_plateau == 'valid_loss':
+                    lr_reducer.on_epoch_end( np.mean(valid_losses) , epoch+1 )
+                else:
+                    lr_reducer.on_epoch_end( valid_exp_qwk, epoch+1 )
 
-    def dump_dists(self, X, y, iterator_fn, batch_size, out_file):
+    def dump_dists(self, X, y, iterator_fn, batch_size, out_file, rnd_state=np.random.RandomState(0), debug=False):
         """
         :param X: input data
         :param out_file: p(y|x)
         :return:
         """
+        print rnd_state.randint(0,1000)
         with open(out_file,"wb") as f:
-            for Xb, yb in iterator_fn(X, y, bs=batch_size, num_classes=self.num_classes):
+            ctr = 0
+            for Xb, yb in iterator_fn(X, y, bs=batch_size, num_classes=self.num_classes, rnd_state=rnd_state):
+                ctr += 1
+                if debug:
+                    print "processing batches %i to %i" % (ctr*batch_size, (ctr+1)*batch_size)
                 dists, _ = self.fns["dists_fn"](Xb)
                 for i, row in enumerate(dists):
                     row = [ str(elem) for elem in row.tolist() ]

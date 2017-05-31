@@ -1,0 +1,2 @@
+epoch,train_loss,train_xent,valid_loss,valid_xent,valid_xent_accuracy,valid_exp_accuracy,valid_xent_qwk,valid_exp_qwk,learning_rate,mb_time,time
+1,nan,nan,nan,nan,0.064599,0.083096,-0.030671,-0.023882,0.000010,0.457638,575.036898

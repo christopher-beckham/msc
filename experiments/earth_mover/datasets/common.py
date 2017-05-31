@@ -16,8 +16,8 @@ def create_imbalanced_data(X_train, y_train, idxs_by_class, classes_to_reduce, r
     """
     rnd_state = np.random.RandomState(seed)
     tot_idxs = []
-    for key in dd:
-        idxs_shuffled = dd[key][:] # [:] to copy
+    for key in idxs_by_class:
+        idxs_shuffled = idxs_by_class[key][:] # [:] to copy
         rnd_state.shuffle(idxs_shuffled)
         if key in classes_to_reduce:
             idxs_shuffled = idxs_shuffled[0:int(len(idxs_shuffled)*reduce_by)]

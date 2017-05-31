@@ -52,6 +52,10 @@ def load_pre_split_data_in_memory(data_dir):
     return xt, yt, xv, yv
 
 def _write_pre_split_data_to_hdf5(data_dir, out_file, split_pt):
+    """
+    Write training and validation images/labels to HDF5, given
+    a pre-defined validation split.
+    """
     import h5py
     xt_filenames, yt, xv_filenames, yv = load_pre_split_data(data_dir, split_pt)
     h5f = h5py.File(out_file, 'w')
@@ -67,54 +71,27 @@ def _write_pre_split_data_to_hdf5(data_dir, out_file, split_pt):
         h5f['yv'][i] = yv[i]
     h5f.close()
 
-def _write_pre_split_data_to_hdf5_fuel(data_dir, out_file, debug=False):
-    from fuel.datasets.hdf5 import H5PYDataset
+def _write_pre_split_test_data_to_hdf5(data_dir, out_file):
+    """
+    Write test images and labels to HDF5.
+    """
     import h5py
-    xt_filenames, yt, xv_filenames, yv = load_pre_split_data(data_dir)
-    if debug:
-        xt_filenames = xt_filenames[0:128]
-        yt = yt[0:128]
-        xv_filenames = xv_filenames[0:128]
-        yv = yv[0:128]
-    f = h5py.File(out_file, mode='w')
-    image_features = f.create_dataset('image_features', (xt_filenames.shape[0]+xv_filenames.shape[0], 3, 256, 256), dtype='float32')
-    targets = f.create_dataset('targets', (xt_filenames.shape[0]+xv_filenames.shape[0],), dtype='int32')
-    for i in range(0, xt_filenames.shape[0]):
-        f['image_features'][i] = iterators._load_image_from_filename(xt_filenames[i])
-        f['targets'][i] = yt[i]
-    offset = xt_filenames.shape[0]
-    for j in range(0, xv_filenames.shape[0]):
-        f['image_features'][offset+j] = iterators._load_image_from_filename(xv_filenames[j])
-        f['targets'][offset+j] = yv[j]
-    split_dict = {
-        'train': {
-            'image_features': (0, xt_filenames.shape[0]),
-            'targets': (0, xt_filenames.shape[0])},
-        'test': {
-            'image_features': (xt_filenames.shape[0], xt_filenames.shape[0]+xv_filenames.shape[0]),
-            'targets': (xt_filenames.shape[0], xt_filenames.shape[0]+xv_filenames.shape[0])}
-        }
-    f.attrs['split'] = H5PYDataset.create_split_array(split_dict)
-    f.flush()
-    f.close()
-    
-def _write_pre_split_dummy_data_to_hdf5_fuel(out_file):
-    from fuel.datasets.hdf5 import H5PYDataset
-    import h5py
-    f = h5py.File(out_file, mode='w')
-    n = 20
-    targets = f.create_dataset('targets', (n,n), dtype='float32')
-    for i in range(n):
-        f['targets'][i] = np.eye(n)[i]
-    split_dict = {
-        'train': {
-            'targets': (0, 10)},
-        'test': {
-            'targets': (10,20)}
-        }
-    f.attrs['split'] = H5PYDataset.create_split_array(split_dict)
-    f.flush()
-    f.close()
+    filenames, labels = [], []
+    with open("dr_test_labels.csv") as f:
+        f.readline()
+        for line in f:
+            line = line.rstrip().split(",")
+            filenames.append("%s/%s.jpeg" % (data_dir, line[0]))
+            labels.append(int(line[1]))
+    xtest_filenames = np.asarray(filenames)
+    ytest = np.asarray(labels, dtype="int32")
+    h5f = h5py.File(out_file, 'w')
+    h5f.create_dataset('xtest' , shape=(len(xtest_filenames),3,256,256), dtype="float32")
+    h5f.create_dataset('ytest' , shape=(len(ytest),), dtype="int32")
+    for i in range(0, xtest_filenames.shape[0]):
+        h5f['xtest'][i] = iterators._load_image_from_filename(xtest_filenames[i])
+        h5f['ytest'][i] = ytest[i]
+    h5f.close()
     
 def _test_timing():
     from time import time
@@ -152,24 +129,14 @@ def _test_timing():
     tmp = [ iterators._augment_image(img, imgen, 224) for img in tmp0 ]
     print "time taken to augment 128 images from shuffled h5: %f" % (time()-t0)
 
-def load_pre_split_data_into_memory_as_hdf5(dataset_dir):
+def load_pre_split_data_into_memory_as_hdf5(dataset_dir, train_and_valid=True):
     import h5py
     h5f = h5py.File(dataset_dir, 'r')
-    return h5f['xt'], h5f['yt'], h5f['xv'], h5f['yv']
+    if train_and_valid:
+        return h5f['xt'], h5f['yt'], h5f['xv'], h5f['yv']
+    else:
+        return h5f['xtest'], h5f['ytest']
 
-def load_pre_split_data_into_memory_as_hdf5_fuel(dataset_dir):
-    # HACKY: this will return "train",yt,"valid",yv, i.e.
-    # the X's will be strings, not tensors
-    import h5py
-    from fuel.datasets import H5PYDataset
-    h5f = h5py.File(dataset_dir, 'r')
-    train_set = H5PYDataset(dataset_dir, which_sets=('train',), sources=['targets']) # load labels only!!
-    valid_set = H5PYDataset(dataset_dir, which_sets=('test',), sources=['targets']) # load labels only!!
-    train_handle = train_set.open()
-    train_data = train_set.get_data(train_handle, slice(0, train_set.num_examples))
-    valid_handle = valid_set.open()
-    valid_data = valid_set.get_data(valid_handle, slice(0, valid_set.num_examples))
-    return "train", train_data[0], "test", valid_data[0] #TODO: change 'test' to 'valid', it requires re-write fuel h5 file
     
 def _test_load_from_memory():
     imgen = ImageDataGenerator(horizontal_flip=True)
@@ -177,15 +144,6 @@ def _test_load_from_memory():
     it = iterators.iterate_images(imgen=imgen,crop=224)
     for xt, yt in it(xt, yt, bs=128, num_classes=5):
         print xt.shape, yt.shape
-
-def _test_hdf5_fuel_load():
-    dataset_dir = "/data/lisatmp4/beckhamc/hdf5/dr_fuel_test.h5"
-    xt_string, yt, xv_string, yv = load_pre_split_data_into_memory_as_hdf5_fuel(dataset_dir)
-    for x,y in iterators.iterate_hdf5_fuel(dataset_dir)(xt_string, None, bs=128, num_classes=5, rnd_state=np.random.RandomState(0)):
-        break
-        
-#def _test_hdf5_iterator():
-    #iterate_hdf5
         
 if __name__ == '__main__':
     #_test_timing()
@@ -199,5 +157,7 @@ if __name__ == '__main__':
     #import h5py
     #f = h5py.File("/data/lisatmp4/beckhamc/hdf5/dummy.h5", mode='r')
     #pdb.set_trace()
-    _write_pre_split_data_to_hdf5("/data/lisatmp4/beckhamc/train-trim-ben-256/", "/data/lisatmp4/beckhamc/hdf5/dr_s0.95.h5", 0.95)
+    #_write_pre_split_data_to_hdf5("/data/lisatmp4/beckhamc/train-trim-ben-256/", "/data/lisatmp4/beckhamc/hdf5/dr_s0.95.h5", 0.95)
     #pass
+
+    _write_pre_split_test_data_to_hdf5("/data/lisatmp4/beckhamc/test-trim-ben-256/", "/data/lisatmp4/beckhamc/hdf5/dr_test.h5")

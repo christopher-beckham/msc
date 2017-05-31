@@ -16,6 +16,11 @@ def _remove_trainable(layer):
     for key in layer.params:
         layer.params[key].remove('trainable')
 
+def _remove_regularizable(layer):
+    for key in layer.params:
+        if 'regularizable' in layer.params[key]:
+            layer.params[key].remove('regularizable')
+        
 def _residual_block(layer, n_out_channels, prefix, stride=1, nonlinearity=rectify):
     """
     residual block
@@ -97,9 +102,11 @@ def _resnet_2x4(l_in, nf=[32, 64, 128, 256], N=2):
     layer = FlattenLayer(layer)
     return layer
 
-class DivLayer(MergeLayer):
-    def __init__(self, incomings, **kwargs):
-        super(DivLayer, self).__init__(incomings, **kwargs)
+class BroadcastableElemwiseMergeLayer(MergeLayer):
+    def __init__(self, incomings, op='div', **kwargs):
+        assert op in ['div', 'mul']
+        super(BroadcastableElemwiseMergeLayer, self).__init__(incomings, **kwargs)
+        self.op = op
 
     def get_output_shape_for(self, input_shapes):
         return self.input_shapes[0]
@@ -107,22 +114,32 @@ class DivLayer(MergeLayer):
     def get_output_for(self, inputs, **kwargs):
         numerator, denominator = inputs
         denominator = T.addbroadcast(denominator, 1) # in case denom is of shape (bs,1)
-        return numerator / denominator
+        if self.op == 'div':
+            return numerator / denominator
+        else:
+            return numerator*denominator
 
-def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode="non_learnable"):
+def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode, fn_learnable_nonlinearity=softplus, extra_depth=None):
     """
-    :tau_mode:
+    layer: the layer we want to tack this on to
+    num_classes:
+    end_nonlinearity: the nonlinearity we wish to apply for the f(x) (lambda)
+    tau: initial value of tau (whether it is learned or fixed)
+    tau_mode:
      learnable = we learn tau directly (but it is the same for all inputs)
      sigm_learnable = we learn tau inside a sigmoid (but it is the same for all inputs)
-     unlearnable = tau is fixed (obviously, the same for all inputs)
-     fn_learnable = we learn a function sigm(T(x)) (changes depending on x)
+     non_learnable = tau is fixed (obviously, the same for all inputs)
+     fn_learnable = we learn a function 1 / 1 + g(T(x)) (where g(.) is softplus)
+    fn_learnable_nonlinearity: only applies if we use fn_learnable
     """
-    assert tau_mode in ["learnable", "non_learnable", "sigm_learnable", "fn_learnable", "fn_learnable_fixed"]
+    assert tau_mode in ["learnable", "non_learnable", "sigm_learnable", "fn_learnable", "fn_learnable_fixed", "fn_learnable_fixed_scap", "fn_learnable_simple", "fn_learnable_simple_scap"]
     if tau_mode == "fn_learnable":
         raise NotImplementedError("fn_learnable (of as before 18/04/2017) incorrectly learned a tau for " + \
                                   "every one of the k classes, as opposed to just one tau. Please use fn_learnable_fixed")
     from scipy.misc import factorial
     #layer.name = "avg_pool"
+    if extra_depth != None:
+        layer = DenseLayer(layer, num_units=extra_depth, nonlinearity=linear) # TEMPORARILY CHANGING TO LINEAR FROM RELU
     l_fx = DenseLayer(layer, num_units=1, nonlinearity=end_nonlinearity)
     l_fx.tag = "fx"
     l_copy = DenseLayer(l_fx, num_units=num_classes, nonlinearity=linear)
@@ -139,20 +156,38 @@ def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode="non_learnable
         elif tau_mode == "sigm_learnable":
             fn = sigmoid
         l_pois = TauLayer(l_pois, tau=lasagne.init.Constant(tau), bias=0., nonlinearity=fn)
-    elif tau_mode == "fn_learnable_fixed":
+    elif tau_mode in ["fn_learnable_fixed", "fn_learnable_fixed_scap"]:
         l_exp = ExpressionLayer(l_copy, lambda x: ((c*T.log(x)) - x - T.log(cf)))
         # this is the T(x) layer that we learn
-        l_tau_pre = DenseLayer(layer, num_units=1, nonlinearity=softplus) # prior to 18/04: num_units=num_classes
+        if tau_mode == "fn_learnable_fixed":
+            # we just map from [resnet] -> [1]
+            l_tau_pre = DenseLayer(layer, num_units=1, nonlinearity=fn_learnable_nonlinearity) # prior to 18/04: num_units=num_classes
+        else:
+            #raise Exception("no longer used")
+            l_tau_pre = DenseLayer( DenseLayer(layer, num_units=num_classes-1, nonlinearity=linear), num_units=1, nonlinearity=fn_learnable_nonlinearity )
         l_tau = ExpressionLayer(l_tau_pre, lambda x: 1.0 / (1.0 + x))
+        #l_tau = DenseLayer(layer, num_units=1, nonlinearity=sigmoid)
         l_tau.name = "tau_fn"
         # then we compute h(x) / T(x)
-        l_div = DivLayer((l_exp,l_tau))
+        l_div = BroadcastableElemwiseMergeLayer((l_exp,l_tau), op='div')
         l_pois = l_div
+    """
+    elif tau_mode in ["fn_learnable_simple", "fn_learnable_simple_scap"]:
+        l_exp = ExpressionLayer(l_copy, lambda x: ((c*T.log(x)) - x - T.log(cf)))
+        if tau_mode == "fn_learnable_simple":
+            l_tau_pre = DenseLayer(layer, num_units=1, nonlinearity=fn_learnable_nonlinearity) ## 1 + x**2
+        else:
+            l_tau_pre = DenseLayer( DenseLayer(layer, num_units=num_classes-1, nonlinearity=rectify), num_units=1, nonlinearity=fn_learnable_nonlinearity )
+        l_tau_pre.name = "tau_fn"
+        l_div = BroadcastableElemwiseMergeLayer((l_exp,l_tau_pre), op='mul')
+        print "BroadcastableElemwiseMergeLayer op: ", l_div.op
+        l_pois = l_div
+    """
     l_softmax = NonlinearityLayer(l_pois, nonlinearity=softmax)
     return l_softmax
 
-def _add_binom(layer, num_classes, tau, tau_mode):
-    assert tau_mode in ["non_learnable", "sigm_learnable", "fn_learnable", "fn_learnable_fixed"]
+def _add_binom(layer, num_classes, tau, tau_mode, fn_learnable_nonlinearity=softplus, extra_depth=None, do_not_regularize_extension=False):
+    assert tau_mode in ["non_learnable", "sigm_learnable", "fn_learnable", "fn_learnable_fixed", "fn_learnable_simple"]
     if tau_mode == "fn_learnable":
         raise NotImplementedError("fn_learnable (of as before 18/04/2017) incorrectly learned a tau for " + \
                                   "every one of the k classes, as opposed to just one tau. Please use fn_learnable_fixed")
@@ -162,6 +197,8 @@ def _add_binom(layer, num_classes, tau, tau_mode):
     # so: i added eps, and added clip
     from scipy.special import binom
     k = num_classes
+    if extra_depth != None:
+        layer = DenseLayer(layer, num_units=extra_depth, nonlinearity=rectify)
     l_sigm = DenseLayer(layer, num_units=1, nonlinearity=sigmoid, W=HeNormal(gain="relu"), b=Constant(0.))
     l_copy = DenseLayer(l_sigm, num_units=k, nonlinearity=linear)
     l_copy.W.set_value( np.ones((1,k)).astype("float32") )
@@ -179,9 +216,19 @@ def _add_binom(layer, num_classes, tau, tau_mode):
             l_logf = TauLayer(l_logf, tau=lasagne.init.Constant(tau), bias=0., nonlinearity=sigmoid)
         elif tau_mode == "fn_learnable_fixed":
             l_h = DenseLayer(layer, num_units=1, nonlinearity=softplus)
+            if do_not_regularize_extension:
+                print "do_not_regularize_extension = True"
+                print l_h.params
+                _remove_regularizable(l_h)
             l_h = ExpressionLayer(l_h, lambda x: 1.0 / (1.0 + x)) # fc(k)
+            l_h.name = "tau_fn"
             # then we compute h(x) / T(x)
-            l_logf = DivLayer((l_logf,l_tau))        
+            l_logf = BroadcastableElemwiseMergeLayer((l_logf,l_h))
+        elif tau_mode == "fn_learnable_simple":
+            l_h = DenseLayer(layer, num_units=1, nonlinearity=fn_learnable_nonlinearity)
+            l_h.name = "tau_fn"
+            l_logf = BroadcastableElemwiseMergeLayer((l_logf,l_h), op='mul')
+            print "BroadcastableElemwiseMergeLayer op: ", l_logf.op
     l_logf = NonlinearityLayer(l_logf, nonlinearity=softmax)
     return l_logf
 
@@ -250,7 +297,14 @@ def resnet_2x4_adience_pois(args):
     """
     layer = InputLayer((None,3,224,224))
     layer = _resnet_2x4(layer)
-    layer = _add_pois(layer, end_nonlinearity=args["end_nonlinearity"], num_classes=8, tau=args["tau"], tau_mode=args["tau_mode"])
+    print "args for this function:", args
+    layer = _add_pois(layer,
+                      end_nonlinearity=args["end_nonlinearity"],
+                      num_classes=8,
+                      tau=args["tau"],
+                      tau_mode=args["tau_mode"],
+                      fn_learnable_nonlinearity=softplus if "fn_learnable_nonlinearity" not in args else args["fn_learnable_nonlinearity"],
+                      extra_depth=None if "extra_depth" not in args else args["extra_depth"])
     return layer
 
 def resnet_2x4_adience_pois_scap(args):
@@ -292,13 +346,28 @@ def resnet_2x4_dr_tau(args):
 def resnet_2x4_dr_pois(args):
     layer = InputLayer((None,3,224,224))
     layer = _resnet_2x4(layer)
-    layer = _add_pois(layer, end_nonlinearity=args["end_nonlinearity"], num_classes=5, tau=args["tau"])
+    print "args for this network:", args
+    layer = _add_pois(layer,
+                      end_nonlinearity=args["end_nonlinearity"],
+                      num_classes=5,
+                      tau=args["tau"],
+                      tau_mode=args["tau_mode"],
+                      fn_learnable_nonlinearity=softplus if "fn_learnable_nonlinearity" not in args else args["fn_learnable_nonlinearity"],
+                      extra_depth=None if "extra_depth" not in args else args["extra_depth"])
     return layer
 
 def resnet_2x4_dr_binom(args):
     layer = InputLayer((None,3,224,224))
     layer = _resnet_2x4(layer)
-    layer = _add_binom(layer, num_classes=5, tau=args["tau"], tau_mode=args["tau_mode"])
+    print "args for this network:", args
+    layer = _add_binom(layer,
+                       num_classes=5,
+                       tau=args["tau"],
+                       tau_mode=args["tau_mode"],
+                       fn_learnable_nonlinearity=softplus if "fn_learnable_nonlinearity" not in args else args["fn_learnable_nonlinearity"],
+                       extra_depth=None if "extra_depth" not in args else args["extra_depth"],
+                       do_not_regularize_extension=True if "do_not_regularize_extension" in args else False
+    )
     return layer
     
 if __name__ == '__main__':

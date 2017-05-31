@@ -7,5 +7,14 @@ get.loess = function(vc, span=0.08) {
   return(predict(loess(vc ~ xx,span=0.08)))
 }
 
-fig.height=2.1
-fig.width=6
+do.plot = function(dfs, exp.names, exp.cols, exp.ltys, which.col, xlab, ylab, xlim, ylim) {
+  for( i in 1:length(dfs)) {
+    df = dfs[[i]]
+    if(i==1) {
+      plot(get.loess(df[which.col][,1]), type="l", lwd=1.5, col=exp.cols[i], lty=exp.ltys[i], xlim=xlim, ylim=ylim, xlab=xlab, ylab=ylab)
+    } else {
+      lines(get.loess(df[which.col][,1]), type="l", lwd=1.5, col=exp.cols[i], lty=exp.ltys[i], xlim=xlim, ylim=ylim, xlab=xlab, ylab=ylab)
+    }
+  }
+  legend("bottomright", legend=exp.names, lwd=1.5, col=exp.cols, lty=exp.ltys, bty="n", cex=0.8)
+}
