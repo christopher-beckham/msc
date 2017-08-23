@@ -116,9 +116,23 @@ class NeuralNet():
     """
         
     def __init__(self, net_fn, num_classes, optimiser=nesterov_momentum,
-                     optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, mode="x_ent", args={}, debug=False):
+                     optimiser_args={"learning_rate":theano.shared(floatX(0.01)),"momentum":0.9}, mode="x_ent", args={}, eps=0., debug=False):
         assert mode in \
-            ["x_ent", "soft", "emd2", "emd22", "xemd2", "exp", "qwk", "sq_err", "sq_err_classic", "qwk_reform", "qwk_reform_classic", "sq_err_backrelu", "sq_err_classic_backrelu", "sq_err_fx"]
+            ["x_ent",
+             "soft",
+             "emd2",
+             "emd22",
+             "xemd2",
+             "exp",
+             "qwk",
+             "sq_err",
+             "sq_err_classic",
+             "qwk_reform",
+             "qwk_reform_classic",
+             "sq_err_backrelu",
+             "sq_err_classic_backrelu",
+             "sq_err_fx",
+             "sq_err_classic_backrelu_flipped"]
         #TODO: clean backrelu
         self.num_classes = num_classes
         self.learning_rate = optimiser_args["learning_rate"]
@@ -127,7 +141,6 @@ class NeuralNet():
         # if it's a dummy distribution
         l_out = net_fn(args)
         assert l_out.output_shape[-1] == self.num_classes
-        self.print_network(l_out)
         self.l_in = get_all_layers(l_out)[0]
         self.l_out_endpt = None
         # theano variables
@@ -137,9 +150,7 @@ class NeuralNet():
         y_ord, y_cum, y_int, y_soft = T.fmatrix('y_ord'), T.fmatrix('y_cum'), T.ivector('y_int'), T.fmatrix('y_soft')
         self.y_soft_sigma = 1.
         # ---
-        self.params = get_all_params(l_out, trainable=True)
-        if self.debug:
-            print "params: ", self.params
+        #self.params = get_all_params(l_out, trainable=True)
         if self.debug:
             print "train_loss: %s" % mode
         if mode == "x_ent":
@@ -147,7 +158,7 @@ class NeuralNet():
             l_exp = self._pmf_to_exp(l_out)
             exp_out, exp_out_det = get_output(l_exp, X), get_output(l_exp, X, deterministic=True) # p(c|x)
             dists_fn = theano.function([X], [dist_out_det, exp_out_det]) # get p(y|x) and p(c|x)
-            train_loss = categorical_crossentropy(dist_out, y).mean()
+            train_loss = categorical_crossentropy(dist_out+eps, y).mean()
             self.l_out_endpt = l_out
             #self.tmp_fn = theano.function([X], get_output([l_out, l_out.input_layer, l_out.input_layer.input_layer, l_out.input_layer.input_layer.input_layer], X, deterministic=True))
         elif mode == "soft":
@@ -209,6 +220,17 @@ class NeuralNet():
             dist_out, dist_out_det = get_output(l_out, X), get_output(l_out, X, deterministic=True)
             dists_fn = theano.function([X], [dist_out_det, net_out_exp_det])
             self.l_out_endpt = l_out_exp
+        elif mode in ["sq_err_classic_backrelu_flipped"]:
+            # [256] -> [l_out_exp] -> [l_out_exp_fakedist]
+            l_out_exp = self._pmf_to_sq_err(l_out.input_layer, nonlinearity=sigm_scaled(self.num_classes))
+            l_out_exp_fakedist = DenseLayer(l_out_exp, num_units=self.num_classes)
+            for key in l_out_exp_fakedist.params:
+                l_out_exp_fakedist.params[key].remove('trainable')
+            net_out_exp, net_out_exp_det = get_output(l_out_exp, X), get_output(l_out_exp, X, deterministic=True)
+            train_loss = squared_error(net_out_exp, y_int.dimshuffle(0,'x')).mean()
+            dist_out, dist_out_det = get_output(l_out_exp_fakedist, X), get_output(l_out_exp_fakedist, X, deterministic=True)
+            dists_fn = theano.function([X], [dist_out_det, net_out_exp_det])
+            self.l_out_endpt = l_out_exp_fakedist
         elif mode == "sq_err_fx":
             # TODO: FIXXXX
             # HACKY: this applies squared_error to a layer before l_out
@@ -253,13 +275,16 @@ class NeuralNet():
             # BUG: this does not affect the l_exp layer??
             train_loss += args["l2"]*regularize_network_params(l_out, l2)
         # get monitors
+        self.print_network(self.l_out_endpt)
         monitors = {}
         for layer in get_all_layers(self.l_out_endpt):
             if layer.name != None:
                 monitors[layer.name] = theano.function([X], get_output(layer, X))
         print "monitors found:", monitors.keys()
-        loss_xent = categorical_crossentropy(dist_out, y).mean()
+        loss_xent = categorical_crossentropy(dist_out+eps, y).mean()
         #loss_emd = squared_error(self.net_out_cum_det, y_cum).mean()
+        self.params = get_all_params(self.l_out_endpt, trainable=True)
+        print "params:", self.params
         grads = T.grad(train_loss, self.params)
         updates = optimiser(grads, self.params, **optimiser_args)
         train_fn = theano.function(inputs=[X, y, y_ord, y_cum, y_int, y_soft], outputs=[train_loss, loss_xent], updates=updates,
@@ -309,7 +334,7 @@ class NeuralNet():
         draw_to_file( get_all_layers(l_out), out_file, verbose=True )
         
     def train(self, data, iterator_fn, batch_size, num_epochs, out_dir, schedule={}, resume=None, save_every=1, save_to=None,
-              rnd_state=np.random.RandomState(0), reduce_lr_on_plateau=None, debug=False, pdb_debug=False):
+              rnd_state=np.random.RandomState(0), reduce_lr_on_plateau=None, debug=False, absorb_valid=False, pdb_debug=False):
         assert save_every >= 1
         header = ["epoch",
                   "train_loss",
@@ -370,24 +395,36 @@ class NeuralNet():
                     break
             valid_losses, valid_xent_losses, valid_emd_losses, valid_xent_correct, valid_exp_correct, valid_xent_preds, valid_exp_preds = \
                 [], [], [], [], [], [], []
-            for Xb, yb in iterator_fn(Xv, yv, bs=batch_size, num_classes=self.num_classes):
+            # if absorb_valid = True, then we want to shuffle this valid set
+            for Xb, yb in iterator_fn(Xv, yv, bs=batch_size, num_classes=self.num_classes, rnd_state=rnd_state if absorb_valid else None):
                 yb_ord, yb_cum, yb_int, yb_soft = \
                     helpers.one_hot_to_ord(yb), helpers.one_hot_to_cmf(yb), helpers.one_hot_to_label(yb), helpers.one_hot_to_soft(yb,self.y_soft_sigma)
-                valid_losses.append( loss_fn(Xb, yb, yb_ord, yb_cum, yb_int, yb_soft) )
-                valid_xent_losses.append( xent_fn(Xb, yb) ); #fs["f_valid_xent"].write("%f\n" % valid_xent_losses[-1])
+                if not absorb_valid:
+                    valid_losses.append( loss_fn(Xb, yb, yb_ord, yb_cum, yb_int, yb_soft) )
+                    valid_xent_losses.append( xent_fn(Xb, yb) ); #fs["f_valid_xent"].write("%f\n" % valid_xent_losses[-1])
+                else:
+                    # if we absorb the valid set, we must also train on this!
+                    this_valid_loss, this_valid_xent = train_fn(Xb,yb,yb_ord,yb_cum,yb_int,yb_soft)
+                    valid_losses.append(this_valid_loss)
+                    valid_xent_losses.append(this_valid_xent)
                 #valid_emd_losses.append( emd_fn(Xb, yb_cum) )
                 d_xent, d_exp = dists_fn(Xb)
-                #pdb.set_trace()
+                # compute how many correct for accuracy
                 valid_xent_correct += ( np.argmax(d_xent,axis=1) == yb_int ).tolist()
                 valid_exp_correct += ( np.clip(np.round(d_exp)[:,0], 0, self.num_classes-1) == yb_int ).tolist()
-                #print valid_correct
+                # compute predictions for the QWK
+                # note that when shuffle is on, this will not produce valid QWKs
                 valid_xent_preds += np.argmax(d_xent,axis=1).tolist()
-                valid_exp_preds += [ int(x) for x in np.round(d_exp)[:,0].tolist() ]
+                valid_exp_preds += [ int(x) for x in np.clip(np.round(d_exp)[:,0].tolist(), 0, self.num_classes-1) ]
                 if debug:
                     break
             #print np.mean(mb_time)
+            #try:
             valid_xent_qwk = helpers.weighted_kappa(actual_rater=yv[:].tolist(), human_rater=valid_xent_preds, num_classes=self.num_classes)
             valid_exp_qwk = helpers.weighted_kappa(actual_rater=yv[:].tolist(), human_rater=valid_exp_preds, num_classes=self.num_classes)
+            #except:
+            #    import pdb
+            #    pdb.set_trace()
             to_write = "%i,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f" % \
                        (epoch+1,
                         np.mean(train_losses),

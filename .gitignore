@@ -5,3 +5,5 @@
 *fuse_hidden*
 slurm*.out
 *.bak
+*.pdf
+._*

@@ -186,7 +186,7 @@ def _add_pois(layer, num_classes, end_nonlinearity, tau, tau_mode, fn_learnable_
     l_softmax = NonlinearityLayer(l_pois, nonlinearity=softmax)
     return l_softmax
 
-def _add_binom(layer, num_classes, tau, tau_mode, fn_learnable_nonlinearity=softplus, extra_depth=None, do_not_regularize_extension=False):
+def _add_binom(layer, num_classes, tau, tau_mode, fn_learnable_nonlinearity=softplus, extra_depth=None, extra_depth_nonlinearity=rectify):
     assert tau_mode in ["non_learnable", "sigm_learnable", "fn_learnable", "fn_learnable_fixed", "fn_learnable_simple"]
     if tau_mode == "fn_learnable":
         raise NotImplementedError("fn_learnable (of as before 18/04/2017) incorrectly learned a tau for " + \
@@ -198,7 +198,7 @@ def _add_binom(layer, num_classes, tau, tau_mode, fn_learnable_nonlinearity=soft
     from scipy.special import binom
     k = num_classes
     if extra_depth != None:
-        layer = DenseLayer(layer, num_units=extra_depth, nonlinearity=rectify)
+        layer = DenseLayer(layer, num_units=extra_depth, nonlinearity=extra_depth_nonlinearity)
     l_sigm = DenseLayer(layer, num_units=1, nonlinearity=sigmoid, W=HeNormal(gain="relu"), b=Constant(0.))
     l_copy = DenseLayer(l_sigm, num_units=k, nonlinearity=linear)
     l_copy.W.set_value( np.ones((1,k)).astype("float32") )
@@ -216,10 +216,10 @@ def _add_binom(layer, num_classes, tau, tau_mode, fn_learnable_nonlinearity=soft
             l_logf = TauLayer(l_logf, tau=lasagne.init.Constant(tau), bias=0., nonlinearity=sigmoid)
         elif tau_mode == "fn_learnable_fixed":
             l_h = DenseLayer(layer, num_units=1, nonlinearity=softplus)
-            if do_not_regularize_extension:
-                print "do_not_regularize_extension = True"
-                print l_h.params
-                _remove_regularizable(l_h)
+            #if do_not_regularize_extension:
+            #    print "do_not_regularize_extension = True"
+            #    print l_h.params
+            #    _remove_regularizable(l_h)
             l_h = ExpressionLayer(l_h, lambda x: 1.0 / (1.0 + x)) # fc(k)
             l_h.name = "tau_fn"
             # then we compute h(x) / T(x)
@@ -267,6 +267,25 @@ def _add_binom_test(layer, num_classes):
     return l_logf
 #### TEST ####
 
+def _add_stick_breaker(layer, num_classes):
+    k = num_classes
+    l_sp = NonlinearityLayer(layer, nonlinearity=softplus)
+    l_agg = DenseLayer(l_sp, num_units=k-1, nonlinearity=linear, W=np.tri(k-1,k-1).T.astype("float32"))
+    _remove_trainable(l_agg)
+    l_merge = ElemwiseMergeLayer([layer, l_agg], merge_function=T.sub)
+    l_exp = NonlinearityLayer(l_merge, nonlinearity=lambda x: T.exp(x))
+    l_extra = DenseLayer(l_exp, num_units=k, nonlinearity=linear, W=np.eye(k-1,k).astype("float32"))
+    _remove_trainable(l_extra)
+    extra_mat = l_extra.W.get_value()
+    extra_mat[:,-1] -= 1
+    l_extra.W.set_value(extra_mat)
+    extra_bias = l_extra.b.get_value()
+    extra_bias[-1] = 1
+    l_extra.b.set_value( extra_bias )
+    l_extra.name = "pdists"
+    return l_extra
+    
+
 def resnet_2x4_adience(args):
     layer = InputLayer((None,3,224,224))
     layer = _resnet_2x4(layer)
@@ -285,6 +304,13 @@ def resnet_2x4_adience_tau(args):
     layer = DenseLayer(layer, num_units=8, nonlinearity=linear)
     layer = TauLayer(layer, tau=lasagne.init.Constant(args["tau"]), bias=0.0)
     layer = NonlinearityLayer(layer, nonlinearity=softmax)
+    return layer
+
+def resnet_2x4_adience_stick_breaker(args):
+    layer = InputLayer((None,3,224,224))
+    layer = _resnet_2x4(layer)
+    layer = DenseLayer(layer, num_units=8-1, nonlinearity=linear)
+    layer = _add_stick_breaker(layer, num_classes=8)
     return layer
 
 def resnet_2x4_adience_pois(args):
@@ -366,7 +392,7 @@ def resnet_2x4_dr_binom(args):
                        tau_mode=args["tau_mode"],
                        fn_learnable_nonlinearity=softplus if "fn_learnable_nonlinearity" not in args else args["fn_learnable_nonlinearity"],
                        extra_depth=None if "extra_depth" not in args else args["extra_depth"],
-                       do_not_regularize_extension=True if "do_not_regularize_extension" in args else False
+                       extra_depth_nonlinearity=rectify if "extra_depth_nonlinearity" not in args else args["extra_depth_nonlinearity"]
     )
     return layer
     
@@ -391,30 +417,34 @@ if __name__ == '__main__':
     print get_output(l_tau,X).eval({X:inp.astype("float32")})
     """
 
-    """
     l_out_1 = resnet_2x4_adience({})
-    l_out_2 = resnet_2x4_adience_test1({})
     l_out_3 = resnet_2x4_adience_pois({"tau":1.0, "tau_mode":"non_learnable", "end_nonlinearity":lasagne.nonlinearities.softplus})
+    l_out_4 = resnet_2x4_adience_pois({"tau":1.0, "tau_mode":"sigm_learnable", "end_nonlinearity":lasagne.nonlinearities.softplus})
 
-    print "resnet adience (8 classes):", count_params(l_out_1, trainable=True)
-    print "resnet adience (1 class test):", count_params(l_out_2, trainable=True)
-    print "resnet adience (8 classes) (pois extension not learning tau):", count_params(l_out_3,trainable=True)
-
-    assert count_params(l_out_2, trainable=True) == count_params(l_out_3,trainable=True)
-    """
-
-    """
+    l_out_sq = resnet_2x4_adience({})
+    l_out_sq = DenseLayer(l_out_sq, num_units=1, nonlinearity=linear)
+    
+    print "resnet adience (baseline):", count_params(l_out_1, trainable=True)
+    print "resnet adience with pois extension (non-learnable):", count_params(l_out_3, trainable=True)
+    print "resnet adience with pois extension (tau learnable bias):", count_params(l_out_4,trainable=True)
+    print "resnet adience with sq error:", count_params(l_out_sq,trainable=True)
+    
+    print "------------"
+    
     l_out_1 = resnet_2x4_dr({})
-    l_out_2 = resnet_2x4_adience_test1({}) # same
     l_out_3 = resnet_2x4_dr_pois({"tau":1.0, "tau_mode":"non_learnable", "end_nonlinearity":lasagne.nonlinearities.softplus})
+    l_out_4 = resnet_2x4_dr_pois({"tau":1.0, "tau_mode":"sigm_learnable", "end_nonlinearity":lasagne.nonlinearities.softplus})
+    l_out_sq = resnet_2x4_dr({})
+    l_out_sq = DenseLayer(l_out_sq, num_units=1, nonlinearity=linear)    
 
-    print "resnet dr (1 classes):", count_params(l_out_1, trainable=True)
-    print "resnet dr (1 class test):", count_params(l_out_2, trainable=True)
-    print "resnet dr (1 classes) (pois extension not learning tau):", count_params(l_out_3,trainable=True)
+    print "resnet dr (baseline):", count_params(l_out_1, trainable=True)
+    print "resnet dr with pois extension (non-learnable):", count_params(l_out_3, trainable=True)
+    print "resnet dr with pois extension (tau learnable bias):", count_params(l_out_4,trainable=True)
+    print "resnet dr with sq error:", count_params(l_out_sq,trainable=True)
 
-    assert count_params(l_out_2, trainable=True) == count_params(l_out_3,trainable=True)
-    """
-
+    print "num params of base:", count_params(l_out_1.input_layer, trainable=True)
+    
+    
     """
     l_in = InputLayer((None,1))
     l_out = _add_binom_test(l_in, num_classes=8)
@@ -426,6 +456,7 @@ if __name__ == '__main__':
     print np.sum(pdists,axis=1) # want all to be == 1.
     """
 
+    """
     l_out_learntau = resnet_2x4_adience_pois({"tau":1.0, "tau_mode":"learnable", "end_nonlinearity":lasagne.nonlinearities.softplus})
     #l_out_learntaufn = resnet_2x4_adience_pois({"tau":1.0, "tau_mode":"fn_learnable", "end_nonlinearity":lasagne.nonlinearities.softplus}) # disabled for now
     l_out_learntaufn_fixed = resnet_2x4_adience_pois({"tau":1.0, "tau_mode":"fn_learnable_fixed", "end_nonlinearity":lasagne.nonlinearities.softplus}) # disabled for now    
@@ -436,3 +467,4 @@ if __name__ == '__main__':
     print "adience learn tau fn fixed", count_params(l_out_learntaufn_fixed)
     print "adience learn tau 'scap'", count_params(l_out_learntau_scap)
     print "adience vanilla", count_params(l_out_vanilla)
+    """

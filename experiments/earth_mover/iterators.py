@@ -218,8 +218,22 @@ if __name__ == '__main__':
     #    print x.shape, y.shape
     #    break
 
-    X = np.eye(10).astype("float32")
-    y = np.argmax(X,axis=1).astype("int32")
+    #X = np.eye(10).astype("float32")
+    #y = np.argmax(X,axis=1).astype("int32")
     
-    for Xb, yb in iterate_semi_shuffle_async()(X, y, bs=2, num_classes=1, rnd_state=np.random.RandomState(10)):
-        print Xb, yb
+    #for Xb, yb in iterate_semi_shuffle_async()(X, y, bs=2, num_classes=1, rnd_state=np.random.RandomState(10)):
+    #    print Xb, yb
+
+    import datasets.dr
+    from keras.preprocessing.image import ImageDataGenerator
+    Xt, yt, Xv, yv = datasets.dr.load_pre_split_data_into_memory_as_hdf5("/data/lisatmp4/beckhamc/hdf5/dr.h5")
+    itr = iterate_hdf5(ImageDataGenerator(), 224)
+    rnd_state = np.random.RandomState(0)
+    for Xb, yb in itr(Xv, yv, 128, 5, rnd_state=rnd_state):
+        print np.argmax(yb,axis=1)
+        break
+    print yv[0:100]
+    for Xb, yb in itr(Xv, yv, 128, 5, rnd_state=rnd_state):
+        print np.argmax(yb,axis=1)
+        break
+    print yv[0:100]

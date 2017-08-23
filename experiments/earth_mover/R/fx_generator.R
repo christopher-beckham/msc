@@ -13,7 +13,7 @@ prep.margins = function() {
   par(mar=c(2,1,2.5,1)+0.1) 
 }
 
-pdf("fx_k4_tau1.pdf",height=4,width=6)
+pdf("fx_k4_tau1-repeat.pdf",height=4,width=6)
 steps = seq(from=0.1,to=5,by=0.25)
 par(mfrow=c(4,5))
 prep.margins()
