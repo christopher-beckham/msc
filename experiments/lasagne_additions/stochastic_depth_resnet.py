@@ -333,7 +333,12 @@ def yu_cifar10_net_decay(args):
         nonlinearity = args["nonlinearity"]
     else:
         nonlinearity = rectify
-    layer = Conv2DLayer(layer, num_filters=16, filter_size=3, stride=1, nonlinearity=nonlinearity, pad='same') #BUG
+    if "fix_bug" not in args:
+        layer = Conv2DLayer(layer, num_filters=16, filter_size=3, stride=1, nonlinearity=nonlinearity, pad='same') #BUG
+    else:
+        sys.stderr.write("12/07/2016: fixed first layer init bug\n")
+        layer = Conv2DLayer(layer, num_filters=16, filter_size=3, stride=1, nonlinearity=nonlinearity, pad='same',
+                            W=get_init(args["init"]))
     #layer = Pool2DLayer(layer, 2)
     l = 1
     L = 3*N + 2
@@ -496,8 +501,8 @@ def get_net(l_out, data, args={}):
     loss_det = categorical_crossentropy(net_out_det, y).mean()
     if "l2" in args:
         sys.stderr.write("adding l2: %f\n" % args["l2"])
-        loss += args["l2"]*regularize_layer_params(l_out, l2)
-        loss_det += args["l2"]*regularize_layer_params(l_out, l2)
+        loss += args["l2"]*regularize_network_params(l_out, l2)
+        loss_det += args["l2"]*regularize_network_params(l_out, l2)
     params = get_all_params(l_out, trainable=True)
     if "max_norm" in args:
         grads = total_norm_constraint( T.grad(loss, params), max_norm=args["max_norm"])
@@ -512,17 +517,19 @@ def get_net(l_out, data, args={}):
         updates = nesterov_momentum(grads, params, learning_rate=learning_rate, momentum=momentum)
     # index fns
     bs = args["batch_size"]
-    X_train, y_train, X_valid, y_valid = data
+    #X_train, y_train, X_valid, y_valid = data
     #y_train = T.cast(y_train, "int32")
     #y_valid = T.cast(y_valid, "int32")
     train_fn = theano.function(inputs=[X,y], outputs=loss, updates=updates)
     loss_fn = theano.function(inputs=[X,y], outputs=loss_det)
     preds_fn = theano.function(inputs=[X], outputs=T.argmax(net_out_det,axis=1))
+    preds_nondet_fn = theano.function(inputs=[X], outputs=T.argmax(net_out,axis=1))
     
     return {
         "train_fn": train_fn,
         "loss_fn": loss_fn,
         "preds_fn": preds_fn,
+        "preds_nondet_fn": preds_nondet_fn,
         "l_out": l_out,
         "learning_rate": learning_rate,
         "bs": bs
@@ -564,6 +571,7 @@ def train(net_cfg,
           debug=False,
           resume=None,
           augment=True,
+          new_epoch=None,
           schedule={}):
     # prepare the out_file
     l_out = net_cfg["l_out"]
@@ -591,7 +599,10 @@ def train(net_cfg,
     
     if debug:
         sys.stderr.write("idxs: %s\n" % train_idxs)
-    for epoch in range(0, num_epochs):
+    if new_epoch == None:
+        new_epoch = 0
+        
+    for epoch in range(new_epoch, num_epochs):
         
         if epoch+1 in schedule:
             sys.stderr.write("changing learning rate to: %f" % schedule[epoch+1])
@@ -642,22 +653,13 @@ def train(net_cfg,
 if __name__ == "__main__":
 
     dat = np.load("cifar10.npz")
-    X_train, y_train, X_valid, y_valid = dat["X_train"], dat["y_train"], dat["X_valid"], dat["y_valid"]
+    X_train, y_train, X_valid, y_valid, X_test, y_test = dat["X_train"], dat["y_train"], dat["X_valid"], dat["y_valid"], dat["X_test"], dat["y_test"]
     X_train = X_train.astype("float32")
     y_train = y_train.astype("int32")
     X_valid = X_valid.astype("float32")
     y_valid = y_valid.astype("int32")
-
-    # -----
-
-    # We want to try and reproduce the results as best as possible from: https://github.com/yueatsprograms/Stochastic_Depth/blob/master/main.lua
-    # 
-    # Need to:
-    # 
-    # * Use He init
-    # * Use learning rate schedule
-    # * Do the random translation crop thing
-    # * Use an L2 weight decay of 1e-4
+    X_test = X_test.astype("float32")
+    y_test = y_test.astype("int32")
 
 
     ##########################################
@@ -668,6 +670,8 @@ if __name__ == "__main__":
     ##########################################
     ##########################################
 
+    # For baseline0, the validation loss goes up, and
+    # the lowest validation loss is achieved at epoch 29
     if "LONG_BASELINE_2" in os.environ:  
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -686,7 +690,6 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={}
             )
-
     if "LONG_BASELINE_2_RESUME" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -705,7 +708,6 @@ if __name__ == "__main__":
                 debug=False,
                 resume="models/long_baseline_more_augment_lr0.1_leto18.0.model.170"
             )
-
     if "LONG_BASELINE_2_RESUME_2" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -724,28 +726,8 @@ if __name__ == "__main__":
                 debug=False,
                 resume="models/long_baseline_more_augment_lr0.1_leto18.0.model.2.220"
             )
-
-    """
-    if "LONG_BASELINE_2_REPLICATE" in os.environ:  
-        out_folder = "output_stochastic_depth_resnet_new"
-        for replicate in [1]:
-            lasagne.random.set_rng(np.random.RandomState(replicate))
-            this_args = {}
-            out_file = "%s/long_baseline_more_augment_lr0.1_leto04.%i" % (out_folder, replicate)
-            train(
-                get_net(
-                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
-                    (X_train, y_train, X_valid, y_valid), 
-                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
-                ),
-                num_epochs=500,
-                data=(X_train, y_train, X_valid, y_valid),
-                out_file=out_file,
-                debug=False,
-                schedule={171: 0.01, 221: 0.001}
-            )
-    """
-
+    # For baseline1, the validation loss goes up, and
+    # the lowest validation loss is achieved at epoch 17
     if "LONG_BASELINE_2_REPLICATE_FIXED" in os.environ:  
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [1]:
@@ -772,7 +754,7 @@ if __name__ == "__main__":
 
 
 
-
+    """
     if "LONG_BASELINE_2_RRELU" in os.environ:  
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -851,15 +833,9 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={224: 0.01}
             )
+    """
 
-
-    # ---------------
-    # repeating the rrelu experiments
-    # to use extreme randomized relu
-    # which is more in line with how
-    # i have formulated stochastic nonlinearity
-
-
+    # lowest validation loss when a=0.1 is when epoch=41
     if "LONG_BASELINE_RRELU_EX" in os.environ:  
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -878,7 +854,6 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={}
             )
-
     if "LONG_BASELINE_RRELU_EX_RESUME" in os.environ:  
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -898,10 +873,7 @@ if __name__ == "__main__":
                 schedule={},
                 resume="models/long_baseline_more_augment_rrelu-ex_lr0.1_leto18.0.model.200.bak"
             )
-
-                
-
-
+    # lowest validation loss when a=0.1 is when epoch=46
     if "LONG_BASELINE_RRELU_EX_REPLICATE" in os.environ:  
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [1]:
@@ -920,10 +892,6 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={}
             )
-
-
-
-
     if "LONG_BASELINE_RRELU_EX_REPLICATE_RESUME" in os.environ:  
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [1]:
@@ -984,8 +952,7 @@ if __name__ == "__main__":
                 out_file=out_file,
                 debug=False,
                 schedule={17+1: 0.01}
-            )
-
+            )    
             
 
     if "RRELU_0" in os.environ:  
@@ -1040,7 +1007,7 @@ if __name__ == "__main__":
     ##########################################
     ##########################################
 
-
+    # lowest validation loss when a=0.1 is when epoch=75
     if "LONG_DEPTH" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -1059,7 +1026,6 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={}
             )
-
     if "LONG_DEPTH_RESUME" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -1079,7 +1045,6 @@ if __name__ == "__main__":
                 schedule={},
                 resume="models/long_depth_more_augment_lr0.1.0.model.187.bak"
             )
-
     if "LONG_DEPTH_RESUME_2" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -1099,7 +1064,7 @@ if __name__ == "__main__":
                 schedule={},
                 resume="models/long_depth_more_augment_lr0.1.0.model.248.bak2"
             )
-
+    """
     if "LONG_DEPTH_REPLICATE" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [1]:
@@ -1118,8 +1083,8 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={188: 0.01, 249: 0.001}
             )
-
-
+    """
+    # lowest validation loss when a=0.1 is when epoch=61
     if "LONG_DEPTH_REPLICATE_FIXED" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [1]:
@@ -1181,7 +1146,6 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={61+1: 0.01}
             )
-
             
 
     ##########################################
@@ -1293,7 +1257,7 @@ if __name__ == "__main__":
                 schedule={168: 0.01, 168+232: 0.001}
             )
     """
-
+    # lowest validation loss when a=0.1 is when epoch=79
     if "LONG_NONLINEARITY_FIXBUG" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -1312,8 +1276,6 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={}
             )
-
-
     if "LONG_NONLINEARITY_FIXBUG_RESUME" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -1333,10 +1295,7 @@ if __name__ == "__main__":
                 schedule={},
                 resume="models/long_nonlinearity_fixbug_more_augment_lr0.1.0.model.212.bak"
             )
-
-
-            
-
+    # lowest validation loss when a=0.1 is when epoch=50
     if "LONG_NONLINEARITY_FIXBUG_REPLICATE" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [1]:
@@ -1355,8 +1314,6 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={}
             )
-
-
     if "LONG_NONLINEARITY_FIXBUG_REPLICATE_RESUME" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [1]:
@@ -1378,7 +1335,7 @@ if __name__ == "__main__":
             )
 
             
-
+    """
     if "LONG_BOTH" in os.environ:
         out_folder = "output_stochastic_depth_resnet_new"
         for replicate in [0]:
@@ -1398,6 +1355,7 @@ if __name__ == "__main__":
                 schedule={},
                 resume="models/long_both_more_augment_lr0.1.0.model.500.bak"
             )
+    """
 
     if "BOTH_LESS9" in os.environ:
         out_folder = "output_final"
@@ -1437,9 +1395,96 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={},
             )
+
+
+    if "BOTH_LESS9_REPLICATE_RESUME" in os.environ:
+        out_folder = "output_final"
+        for replicate in [1]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/both_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+                resume="models/both_n0.9.1.model.90.bak"
+            )
             
 
 
+
+    if "BOTH_LESS9_ELU_0" in os.environ:
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/both_elu_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9, "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+            )
+
+
+    if "BOTH_LESS9_ELU_1" in os.environ:
+        out_folder = "output_final"
+        for replicate in [1]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/both_elu_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9, "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+            )
+
+
+    if "BOTH_LESS9_ELU_1_RESUME" in os.environ:
+        out_folder = "output_final"
+        for replicate in [1]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/both_elu_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9, "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+                resume="models/both_elu_n0.9.1.model.102.bak"
+            )
+    
+
+
+            
+
+    """
     if "BOTH_LESS8" in os.environ:
         out_folder = "output_final"
         for replicate in [0]:
@@ -1458,7 +1503,7 @@ if __name__ == "__main__":
                 debug=False,
                 schedule={},
             )
-            
+    """     
 
 
             
@@ -1563,8 +1608,7 @@ if __name__ == "__main__":
                 out_file=out_file,
                 debug=False,
                 schedule={50+1: 0.01}
-            )
-            
+            )            
 
     ##########################################
     ##########################################
@@ -1979,6 +2023,29 @@ if __name__ == "__main__":
             )
 
 
+    # i didn't let this run long enough...
+    if "DEPTH_ELU_0_RESUME" in os.environ:
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/depth_elu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "depth", "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=500,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                resume="models/depth_elu.0.model.111.bak"
+            )
+
+
+            
+
     if "DEPTH_ELU_1" in os.environ:
         out_folder = "output_final"
         for replicate in [1]:
@@ -1996,4 +2063,711 @@ if __name__ == "__main__":
                 out_file=out_file,
                 debug=False,
                 schedule={58+1: 0.01}
+            )
+
+    
+    # --------------------------------------------------
+    # re-training on both train+test
+    # now, the "valid set" is actually the test st
+
+    dat2 = np.load("cifar10_for_test.npz")
+    X_train_and_valid, y_train_and_valid = dat2["X_train_and_valid"], dat2["y_train_and_valid"]
+    X_test, y_test = dat2["X_test"], dat2["y_test"]
+    X_train_and_valid = X_train_and_valid.astype("float32")
+    y_train_and_valid = y_train_and_valid.astype("int32")
+    X_test = X_test.astype("float32")
+    y_test = y_test.astype("int32")
+    
+    
+    if "FULL_BASELINE_1" in os.environ:  
+        out_folder = "output_final"
+        for replicate in [1]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/full_baseline.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
+                    None, 
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=190,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={17+1: 0.01}
+            )
+
+
+    if "FULL_NONLINEARITY_0" in os.environ:
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/full_nonlinearity.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity"}),
+                    None,
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=90,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={79+1: 0.01}
+            )
+    if "FULL_NONLINEARITY_0_RESUME" in os.environ:
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/full_nonlinearity.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity"}),
+                    None,
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=200,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                resume="models/full_nonlinearity.0.model.90"
+            )
+
+
+
+            
+    if "FULL_DEPTH_1" in os.environ:
+        out_folder = "output_final"
+        for replicate in [1]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/full_depth.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "depth"}),
+                    None,
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=129,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={61+1: 0.01}
+            )
+    if "FULL_DEPTH_1_RESUME" in os.environ:
+        out_folder = "output_final"
+        for replicate in [1]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/full_depth.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "depth"}),
+                    None,
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=200,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                resume="models/full_depth.1.model.129"
+            )
+
+
+            
+
+    if "FULL_BOTH_LESS9" in os.environ:
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/full_both_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9}),
+                    None,
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=217,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+            )
+    """
+    if "FULL_BOTH_LESS9_RESUME" in os.environ:
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/full_both_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9}),
+                    None,
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=10,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+                resume="models/full_both_n0.9.0.model.209"
+            )
+    """
+
+
+    if "FULL_BASELINE_ELU_0" in os.environ:  
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/full_baseline_elu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None, "nonlinearity": elu}),
+                    None, 
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=42,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={31+1: 0.01}
+            )
+
+
+    if "FULL_DEPTH_ELU_0" in os.environ:
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/full_depth_elu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "depth", "nonlinearity": elu}),
+                    None,
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=110,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={91+1: 0.01}
+            )
+
+
+    if "FULL_NONLINEARITY_ELU_0" in os.environ:
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/full_nonlinearity_elu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity", "nonlinearity": elu}),
+                    None,
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=86,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={60+1: 0.01}
+            )
+
+    
+
+    # --------------------
+
+
+
+
+
+            
+
+    if "BASELINE_0_FS" in os.environ:  
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/baseline_fs.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None, "fix_bug": True}),
+                    None, 
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=256,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={196: 0.01, 224: 0.001},
+                resume="models/baseline_fs.0.model.162.bak",
+                new_epoch=162
+            )
+
+
+    if "DEPTH_0_FS" in os.environ:
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/depth_fs.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "depth", "fix_bug": True}),
+                    None,
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=256,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={196: 0.01, 224: 0.001},
+                resume="models/depth_fs.0.model.98.bak",
+                new_epoch=98
+            )
+
+
+    if "NONLINEARITY_0_FS" in os.environ:
+        out_folder = "output_final"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/nonlinearity_fs.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity", "fix_bug": True}),
+                    None,
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train_and_valid, y_train_and_valid, X_test, y_test),
+                out_file=out_file,
+                debug=False,
+                schedule={196: 0.01, 224: 0.001},
+                resume="models/nonlinearity_fs.0.model.157.bak",
+                new_epoch=157
+            )
+# ------  i missed up the l2
+
+
+    if "F_BASELINE_0" in os.environ:  
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/baseline.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False
+            )
+    if "F_BASELINE_0_RESUME" in os.environ:  
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/baseline.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                resume="models/baseline.0.model.100.fixl2.bak"
+            )
+    if "F_BASELINE_1" in os.environ:  
+        out_folder = "output_final_fixl2"
+        for replicate in [1]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/baseline.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None}),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=200,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={101: 0.01}
+            )
+    # ------------
+
+            
+
+
+    if "F_DEPTH_0" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/depth.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "depth"}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False
+            )
+    if "F_DEPTH_0_RESUME" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/depth.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "depth"}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                resume="models/depth.0.model.100.fixl2.bak"
+            )
+
+
+
+            
+
+    if "F_NONLINEARITY_0" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/nonlinearity.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity"}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False
+            )
+    if "F_NONLINEARITY_0_RESUME" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/nonlinearity.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity"}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                resume="models/nonlinearity.0.model.100.fixl2.bak"
+            )
+
+    if "F_NONLINEARITY_1" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [1]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/nonlinearity.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity"}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=200,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={101: 0.01}
+            )
+    if "F_NONLINEARITY_LITE9_0" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/nonlinearity_lite9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": 0.9}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=200,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={101: 0.01}
+            )
+
+
+
+            
+
+    if "F_RRELU_0" in os.environ:  
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/rrelu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None, "rrelu": True}),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False
+            )
+    if "F_RRELU_0_RESUME" in os.environ:  
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/rrelu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None, "rrelu": True}),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                resume="models/rrelu.0.model.100.fixl2.bak"
+            )
+
+
+            
+
+
+    if "F_BOTH_LESS9_0" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/both_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+            )
+
+    if "F_BOTH_LESS9_0_RESUME" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/both_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+                resume="models/both_n0.9.0.model.100.fixl2.bak"
+            )
+
+
+
+            
+
+    if "F_BASELINE_ELU_0" in os.environ:  
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/baseline_elu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None, "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False
+            )
+    if "F_BASELINE_ELU_0_RESUME" in os.environ:  
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/baseline_elu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net({"init":"he", "survival_p":None, "nonlinearity_p": None, "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid), 
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                resume="models/baseline_elu.0.model.100.fixl2.bak"
+            )
+
+
+
+            
+
+    if "F_NONLINEARITY_ELU_0" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/nonlinearity_elu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity", "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False
+            )
+    if "F_NONLINEARITY_ELU_0_RESUME" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/nonlinearity_elu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "nonlinearity", "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                resume="models/nonlinearity_elu.0.model.100.fixl2.bak"
+            )
+
+
+            
+
+    if "F_DEPTH_ELU_0" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/depth_elu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "depth", "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=500,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False
+            )
+    if "F_DEPTH_ELU_0_RESUME" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/depth_elu.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "depth", "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=500,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                resume="models/depth_elu.0.model.100.fixl2.bak"
+            )
+
+
+
+            
+
+    if "F_BOTH_LESS9_ELU_0" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/both_elu_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9, "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.1}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+            )
+
+    if "F_BOTH_LESS9_ELU_0_RESUME" in os.environ:
+        out_folder = "output_final_fixl2"
+        for replicate in [0]:
+            lasagne.random.set_rng(np.random.RandomState(replicate))
+            this_args = {}
+            out_file = "%s/both_elu_n0.9.%i" % (out_folder, replicate)
+            train(
+                get_net(
+                    yu_cifar10_net_decay({"init":"he", "decay": "less_nonlinearity", "less_nonlinearity": 0.9, "nonlinearity": elu}),
+                    (X_train, y_train, X_valid, y_valid),
+                    {"batch_size": 128, "l2":1e-4, "learning_rate":0.01}
+                ),
+                num_epochs=1000,
+                data=(X_train, y_train, X_valid, y_valid),
+                out_file=out_file,
+                debug=False,
+                schedule={},
+                resume="models/both_elu_n0.9.0.model.100.fixl2.bak"
             )

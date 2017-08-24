@@ -19,7 +19,7 @@ sys.path.append("../../modules/")
 import helper as hp
 
 import matplotlib.pyplot as plt
-get_ipython().magic(u'matplotlib inline')
+#get_ipython().magic(u'matplotlib inline')
 
 import os
 import cPickle as pickle
@@ -74,38 +74,14 @@ for img in X_test:
     tmp[:, 4:-4, 4:-4] = img
     new_X_test.append(tmp)    
 
-
-# In[147]:
-
 new_X_train = np.asarray(new_X_train)
 print new_X_train.shape
 
-#new_X_valid = np.asarray(new_X_valid)
-#print new_X_valid.shape
-
-#new_X_test = np.asarray(new_X_test)
-#print new_X_test.shape
-
-
-# In[128]:
-
 img = new_X_train[8]
-plt.imshow(disp_form(new_X_train[11]))
-
-
-# In[138]:
 
 def extract_crop(img):
     rand_x, rand_y = np.random.randint(0,9), np.random.randint(0,9)
     return img[:,rand_x:rand_x+32,rand_y:rand_y+32]
-
-
-# In[146]:
-
-plt.imshow( disp_form(extract_crop(new_X_train[0])) )
-
-
-# In[148]:
 
 np.savez("cifar10.npz", 
     X_train=new_X_train, 
@@ -116,13 +92,7 @@ np.savez("cifar10.npz",
     y_test=y_test
 )
 
-
-# In[124]:
-
-new_X_train.shape, y_train.shape, new_X_valid.shape, y_valid.shape, new_X_test.shape, y_test.shape
-
-
-# In[ ]:
+print new_X_train.shape, y_train.shape, new_X_valid.shape, y_valid.shape, new_X_test.shape, y_test.shape
 
 
 

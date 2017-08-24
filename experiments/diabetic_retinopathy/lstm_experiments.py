@@ -1,4 +1,3 @@
-
 import theano
 from theano import tensor as T
 import lasagne
@@ -10,30 +9,11 @@ from lasagne.updates import *
 from lasagne.regularization import *
 import sys
 import numpy as np
-from skimage import io, img_as_float
 import cPickle as pickle
 import os
 from time import time
-from keras.preprocessing.image import ImageDataGenerator
 import gzip
 from quadrant_network_dr import *
-
-def integer_to_one_hot(X_train):
-    #total = []
-    total = np.zeros((X_train.shape[0], X_train[0].shape[0], 256))
-    for b in range(0, X_train.shape[0]):
-        #seqs = []
-        seqs = np.zeros((X_train[b].shape[0], 256)).astype("float32")
-        for i in range(0, X_train[b].shape[0]):
-            one_hot = np.zeros((256)).astype("float32")
-            one_hot[ X_train[b][i] ] = 1.0
-            #seqs.append(one_hot)
-            seqs[i] = one_hot
-        #seqs = np.asarray(seqs, dtype="float32")
-        #total.append(seqs)
-        total[b] = seqs
-    #total = np.asarray(total, dtype="float32")
-    return total
 
 if __name__ == '__main__':
 
@@ -64,6 +44,82 @@ if __name__ == '__main__':
         cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.0001, "num_units":200, "klo":True, "rmsprop":True})
         train_lstm(cfg, out_file="output_lstm/test_klo_orthog", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
 
+    def test_klo_orthog_lr0001():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.0001, "num_units":200, "mode":"klo", "rmsprop":True})
+        train_lstm(cfg, out_file="output_lstm/test_klo_orthog_lr0.001", num_epochs=30, debug=False, data=(X_train_I,X_valid_I),resume="/data/lisatmp4/beckhamc/models_neat/test_klo_orthog_lr0.001.modelv2.30.bak")
         
+    def test_xent_orthog():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.0001, "num_units":200, "rmsprop":True})
+        train_lstm(cfg, out_file="output_lstm/test_xent_orthog", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
+
+    def test_xent_orthog_lr001():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.01, "num_units":200, "rmsprop":True})
+        train_lstm(cfg, out_file="output_lstm/test_xent_orthog_lr0.01", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
+
+    def test_qwk_orthog_lr0001():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.001, "num_units":200, "mode":"qwk", "rmsprop":True})
+        train_lstm(cfg, out_file="output_lstm/test_qwk_orthog_lr0.001", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
+
+    # ----------------------
+
+    def test_xent_orthog_100u_clip1():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.001, "num_units":100, "optim":"rmsprop", "mode":"xent", "clip":1.0})
+        train_lstm(cfg, out_file="output_lstm/new_test_xent_orthog_100u_lr0.001_clip1", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
+
+    def test_xent_orthog_100u_clip1_forget1():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.001, "num_units":100, "optim":"rmsprop", "mode":"xent", "clip":1.0, "forget_init":1.0})
+        train_lstm(cfg, out_file="output_lstm/new_test_xent_orthog_100u_lr0.001_clip1_forget1", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
+        
+    def test_xent_orthog_200u_clip1_forget1():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.001, "num_units":200, "optim":"rmsprop", "mode":"xent", "clip":1.0, "forget_init":1.0})
+        train_lstm(cfg, out_file="output_lstm/new_test_xent_orthog_200u_lr0.001_clip1_forget1", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
+
+    def test_klo_orthog_200u_clip1_forget1():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.001, "num_units":200, "optim":"rmsprop", "mode":"klo", "clip":1.0, "forget_init":1.0})
+        train_lstm(cfg, out_file="output_lstm/new_test_klo_orthog_200u_lr0.001_clip1_forget1", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
+
+    def test_qwk_orthog_200u_clip1_forget1():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.001, "num_units":200, "optim":"rmsprop", "mode":"qwk", "clip":1.0, "forget_init":1.0})
+        train_lstm(cfg, out_file="output_lstm/new_test_qwk_orthog_200u_lr0.001_clip1_forget1", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
+
+
+        
+    def test_xent_orthog_300u_clip1_forget1():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.001, "num_units":300, "optim":"rmsprop", "mode":"xent", "clip":1.0, "forget_init":1.0})
+        train_lstm(cfg, out_file="output_lstm/new_test_xent_orthog_300u_lr0.001_clip1_forget1", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
+
+    def test_xent_orthog_400u_clip1_forget1():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.001, "num_units":400, "optim":"rmsprop", "mode":"xent", "clip":1.0, "forget_init":1.0})
+        train_lstm(cfg, out_file="output_lstm/new_test_xent_orthog_400u_lr0.001_clip1_forget1", num_epochs=30, debug=False, data=(X_train_I,X_valid_I))
+        
+        
+    def test_xent_orthog_200u_clip1_forget5():
+        seed = 1
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        cfg = get_net_lstm(lstm_orthog, {"batch_size": 128, "learning_rate":0.001, "num_units":200, "optim":"rmsprop", "mode":"xent", "clip":1.0, "forget_init":5.0})
+        train_lstm(cfg, out_file="output_lstm/new_test_xent_orthog_200u_lr0.001_clip1_forget5", num_epochs=50, debug=False, data=(X_train_I,X_valid_I))
+
         
     globals()[ sys.argv[1] ]()

@@ -20,6 +20,31 @@ from keras.preprocessing.image import ImageDataGenerator
 import pdb
 from itertools import cycle
 
+def hypersphere(l_final, num_classes=5):
+    def remove_trainable(layer):
+        for key in layer.params.keys():
+            layer.params[key].remove("trainable")
+    l_euclid_W = np.asarray([ [1] for i in range(num_classes) ]).astype("float32")
+    l_euclid = DenseLayer( NonlinearityLayer(l_final, lambda x:x**2), num_units=1, W=l_euclid_W)
+    remove_trainable(l_euclid)
+    l_class_W = np.asarray([[ -1 for i in range(num_classes-1) ]]).astype("float32")
+    l_class = DenseLayer(l_euclid, num_units=num_classes-1, W=l_class_W, nonlinearity=linear)
+    remove_trainable(l_class)
+    sd=0.1
+    b = theano.shared(np.asarray([[ np.random.normal(0, sd) for i in range(num_classes-1)]]).astype("float32"))
+    M = theano.shared(np.triu( np.ones((num_classes-1,num_classes-1)) ).astype("float32"))
+    bm = T.addbroadcast(T.dot(b**2, M), 0)
+    #print b.get_value().shape, M.get_value().shape
+    #print l_class.output_shape
+    l_bias = NonlinearityLayer(ExpressionLayer(l_class, lambda X: X-bm), nonlinearity=sigmoid)
+    #l_actual_probs = OrdinalSubtractLayer(l_bias)
+    #remove_trainable(l_actual_probs)
+    #return l_actual_probs
+    return {
+        "layers": {"l_bias": l_bias},
+        "params": b
+    }
+
 class SimpleOrdinalSubtractLayer(Layer):
     def __init__(self, incoming, **kwargs):
         super(SimpleOrdinalSubtractLayer, self).__init__(incoming, **kwargs)
@@ -127,22 +152,17 @@ def sigm_scaled(x):
     k = 5 # 5 classes
     return sigmoid(x)*(k-1)
 
+def qwk_reform(predictions, targets):
+    num = 2*T.dot(targets,predictions) - 2*predictions.shape[0]*T.mean(predictions)*T.mean(targets)
+    den = T.dot(targets, targets.dimshuffle(0,'x')) + T.dot(predictions.T, predictions) - (2*predictions.shape[0]*T.mean(targets)*T.mean(predictions))
+    #return num/den
+    return (num / den).mean() # mean() is a hack
+
 def qwk(predictions, targets, num_classes=5):
     w = np.ones((num_classes,num_classes))
     for i in range(0, num_classes):
         for j in range(0, num_classes):
             w[i,j] = (i-j)**2
-    numerator = T.dot(targets.T, predictions)
-    denominator = T.outer(targets.sum(axis=0), predictions.sum(axis=0))
-    denominator = denominator / T.sum(numerator)
-    qwk = (T.sum(numerator*w) / T.sum(denominator*w))
-    return qwk
-
-def qwk_normw(predictions, targets, num_classes=5):
-    w = np.ones((num_classes,num_classes))
-    for i in range(0, num_classes):
-        for j in range(0, num_classes):
-            w[i,j] = ( (1.0*i-j)**2 ) / ((num_classes-1)**2)
     numerator = T.dot(targets.T, predictions)
     denominator = T.outer(targets.sum(axis=0), predictions.sum(axis=0))
     denominator = denominator / T.sum(numerator)
@@ -167,7 +187,6 @@ def qwk_cf(predictions, targets, num_classes=5):
     for i in range(0, num_classes):
         for j in range(0, num_classes):
             w[i,j] = (i-j)**2
-
     I = np.asarray([25810.0,2443.0,5292.0,873.0,708.0], dtype="float32")
     I = I / np.sum(I)
     #pdb.set_trace()
@@ -188,75 +207,89 @@ def get_net_baseline(net_fn, args={}):
     l_out = cfg["l_out"]
     l_in = cfg["l_in"]
 
+    extra_params = []
+    h_fn = None
+    if args["mode"] == "hypersphere":
+        # we need to plop layers on top of l_out
+        hypersphere_dict = hypersphere(l_out)
+        b1 = hypersphere_dict["params"]
+        h1 = hypersphere_dict["layers"]["l_bias"]
+        h1_out = get_output(h1, {l_in: X})
+        h_fn = theano.function([X], [h1_out])
+        extra_params.append(b1)
+        print "extra params for hypersphere", str(extra_params)
+        l_out = hypersphere_dict["layers"]["l_bias"]
+
     l_exp = DenseLayer(l_out, num_units=1, nonlinearity=linear)
+    print_network(l_exp)
+    #pdb.set_trace()
+
+    params = get_all_params(l_out, trainable=True)
+    params += extra_params
+
+    assert args["mode"] in ["hacky_ordinal", "hypersphere", "xent", "klo", "qwk", "qwk_hybrid", "qwk_cf", "qwk_reform"]
+    assert "learn_end" in args
     
-    # if we are not learning the 'a' vector, just fix it to something
-    if "learn_end" not in args:
-        if "hacky_ordinal" in args:
-            # just hack something in here for now
+    if not args["learn_end"]:
+        # if we are not learning the 'a' vector, just fix it to something
+        if args["mode"] in ["hacky_ordinal", "hypersphere"]:
+            # just hack something in here for now, we don't use the expectation
+            # for these methods
             l_exp.W.set_value(np.asarray([[0.],[0.],[0.],[0.]], dtype="float32"))
         else:
             l_exp.W.set_value(np.asarray([[0.],[1.],[2.],[3.],[4.]], dtype="float32"))
-    params = get_all_params(l_out, trainable=True)
-    if "learn_end" in args:
-        assert args["learn_end"] in ["sigm_scaled", "keep_xent"]
+            
+    if args["learn_end"]:
+        assert args["learn_end_options"] in ["sigm_scaled", "normal"]
         # if we are learning the 'a' vector, make it learnable
         sys.stderr.write("learning W matrix of l_exp\n")
         params += [l_exp.W]
-        if args["learn_end"] == "sigm_scaled":
+        if args["learn_end_options"] == "sigm_scaled":
             sys.stderr.write("making l_exp nonlinearity sigm_scaled\n")
             l_exp.nonlinearity = sigm_scaled
-        elif args["learn_end"] == "keep_xent":
-            sys.stderr.write("optimising both x-ent and squared error\n")
-            l_exp.W.set_value(np.asarray([[0.],[1.],[2.],[3.],[4.]], dtype="float32"))
+        #elif args["learn_end_options"] == "keep_xent":
+        #    sys.stderr.write("optimising both x-ent and squared error\n")
+        #    l_exp.W.set_value(np.asarray([[0.],[1.],[2.],[3.],[4.]], dtype="float32"))
 
     net_out, exp_out = get_output([l_out,l_exp], {l_in: X})
     net_out_det, exp_out_det = get_output([l_out,l_exp], {l_in: X}, deterministic=True)
 
-    tmp_out = get_output(l_exp, {l_in: X})
-
-    if "hacky_ordinal" in args:
+    if args["mode"] == "hacky_ordinal":
         sys.stderr.write("using binary_crossentropy for both loss and loss_det (hacky ordinal mode)\n")
         loss = binary_crossentropy(net_out, y_ord).mean()
         loss_det = binary_crossentropy(net_out, y_ord).mean()
-    elif "learn_end" in args:
+    elif args["mode"] == "sq_err":
         sys.stderr.write("using squared_error for learn_end\n")
-        if args["learn_end"]== "keep_xent":
-            loss = squared_error(exp_out, y.dimshuffle(0,'x')).mean() + categorical_crossentropy(net_out, y).mean()
-        else:
-            loss = squared_error(exp_out, y.dimshuffle(0,'x')).mean()
+        loss = squared_error(exp_out, y.dimshuffle(0,'x')).mean()
         loss_det = categorical_crossentropy(net_out_det, y).mean()
-    elif "qwk" in args:
+    elif args["mode"] == "qwk":
         sys.stderr.write("using qwk loss\n")
         loss = qwk(net_out, y_onehot)
         loss_det = categorical_crossentropy(net_out_det, y).mean()
-    elif "qwk_normw" in args:
-        sys.stderr.write("using qwk normw loss\n")
-        loss = qwk_normw(net_out, y_onehot)
-        loss_det = categorical_crossentropy(net_out_det, y).mean()        
-    elif "kappa" in args:
-        sys.stderr.write("using kappa (NOT quadratic)\n")
-        loss = kappa(net_out, y_onehot)
+    elif args["mode"] == "qwk_reform":
+        sys.stderr.write("using qwk reform\n")
+        # this can be combined with learn_end or not...
+        loss = -qwk_reform(exp_out, y)
+        # in retrospect, i should have made loss_det to be the deterministic version of loss
         loss_det = categorical_crossentropy(net_out_det, y).mean()
-    elif "qwk_hybrid" in args:
-        sys.stderr.write("using qwk hybrid loss\n")
-        loss = categorical_crossentropy(net_out, y).mean() + args["qwk_hybrid"]*qwk(net_out, y_onehot)
-        loss_det = categorical_crossentropy(net_out_det, y).mean()
-    elif "qwk_cf" in args:
+    elif args["mode"] == "qwk_cf":
         sys.stderr.write("using qwk cf\n")
         loss = qwk_cf(net_out, y_onehot)
-        loss_det = categorical_crossentropy(net_out_det, y).mean()        
-    else:
+        loss_det = categorical_crossentropy(net_out_det, y).mean()
+    # NOTE: this has been merged with learn_end, which is now the mode 'sq_err'
+    #elif args["mode"] == "klo":
+    #    loss = hp.get_kappa_loss(5)(net_out, y).mean()
+    #    #loss_det = hp.get_kappa_loss(5)(net_out_det, y).mean()
+    #    sys.stderr.write("using kappa loss term\n")
+    elif args["mode"] == "hypersphere":
+        loss = binary_crossentropy(net_out, y_ord).mean()
+        loss_det = binary_crossentropy(net_out, y_ord).mean()
+        #loss = categorical_crossentropy(net_out, y).mean()
+        #loss_det = categorical_crossentropy(net_out_det, y).mean()
+        sys.stderr.write("using hyperspheres method\n")
+    elif args["mode"] == "xent":
         loss = categorical_crossentropy(net_out, y).mean()
         loss_det = categorical_crossentropy(net_out_det, y).mean()
-
-    # total kappa loss using the expectation trick
-    if "klo" in args:
-        loss = hp.get_kappa_loss(5)(net_out, y).mean()
-        #loss_det = hp.get_kappa_loss(5)(net_out_det, y).mean()
-        sys.stderr.write("using kappa loss term\n")
-        # for validation set we want to evaluate the
-        # cross-entropy still
     
     if "l2" in args:
         sys.stderr.write("adding l2: %f\n" % args["l2"])
@@ -287,19 +320,19 @@ def get_net_baseline(net_fn, args={}):
         inputs=[X],
         outputs=[net_out_det, exp_out_det]
     )
-    tmp_fn = theano.function(inputs=[X], outputs=tmp_out)
     
     return {
         "train_fn": train_fn,
         "loss_fn": loss_fn,
         "preds_fn": preds_fn,
+        "tmp_fn":h_fn,
         "dist_fn": dist_fn,
-        "tmp_fn":tmp_fn,
         "l_out": l_out,
         "l_exp": l_exp,
         "learning_rate": learning_rate,
         "bs": bs,
-        "is_hacky_ordinal": True if "hacky_ordinal" in args else False
+        "params":params,
+        "mode": args["mode"]
     }
 
 def residual_block(layer, n_out_channels, prefix, stride=1, dd={}, nonlinearity=rectify):
@@ -454,6 +487,10 @@ def resnet_net_256_baseline(args={}):
 
 
 
+def print_network(l_out):
+    for layer in get_all_layers(l_out):
+        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
+
 def resnet_net_224_baseline(args={}):
     
     l_in = InputLayer( (None, 3, 224, 224) )
@@ -464,8 +501,6 @@ def resnet_net_224_baseline(args={}):
         sys.stderr.write("adding end dropout: %f\n" % args["end_dropout"])
         conv = DropoutLayer(conv, p=args["end_dropout"])
         
-    for layer in get_all_layers(conv):
-        sys.stderr.write( str(layer) + " " + str(layer.output_shape) + "\n")
 
     if "out_nonlinearity" in args:
         out_nonlinearity = args["out_nonlinearity"]
@@ -482,7 +517,6 @@ def resnet_net_224_baseline(args={}):
     
     return {"l_out": l_out,
             "l_in": l_in}
-
 
 
 
@@ -712,7 +746,7 @@ def iterate_mnist(X_arr, bs):
         yield this_X_I, this_X
         b += 1
 
-def iterate_baseline(X_arr, y_arr, bs, augment, zmuv, crop, DATA_DIR=os.environ["DATA_DIR"]):
+def iterate_baseline(X_arr, y_arr, bs, augment, crop, DATA_DIR=os.environ["DATA_DIR"]):
     assert X_arr.shape[0] == y_arr.shape[0]
     b = 0
     while True:
@@ -822,7 +856,18 @@ def epoch_iterator(x1, num_epochs):
         x1 = x1[idxs]
         #x2 = x2[idxs]
         yield x1
-                
+
+def epoch_xy_iterator(x1, x2, num_epochs):
+    """
+    Basic epoch shuffle iterator
+    """
+    idxs = [x for x in range(0, x1.shape[0])]
+    for epoch in range(0, num_epochs):
+        np.random.shuffle(idxs)
+        x1 = x1[idxs]
+        x2 = x2[idxs]
+        yield x1, x2
+        
 def train_baseline(net_cfg,
           num_epochs,
           data,
@@ -831,7 +876,6 @@ def train_baseline(net_cfg,
           resume=None,
           resume_legacy=False,
           augment=True,
-          zmuv=False,
           crop=None,
           balanced_minibatches=False,
           schedule={},
@@ -848,10 +892,9 @@ def train_baseline(net_cfg,
     train_fn, loss_fn, preds_fn, dist_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["preds_fn"], net_cfg["dist_fn"]
     learning_rate = net_cfg["learning_rate"]
     bs = net_cfg["bs"]
-    is_hacky_ordinal = net_cfg["is_hacky_ordinal"]
     
     # training
-    for epoch, (X_train, y_train) in enumerate(epoch_iterator(X_train,y_train)):
+    for epoch, (X_train, y_train) in enumerate(epoch_xy_iterator(X_train,y_train,num_epochs)):
         
         if epoch+1 in schedule:
             sys.stderr.write("train_baseline(): changing learning rate to: %f\n" % schedule[epoch+1])
@@ -871,16 +914,19 @@ def train_baseline(net_cfg,
             # training loop
             this_train_losses = []
             t0 = time()
-            for X_train_batch, y_train_batch, y_onehot_train_batch in iterator_function(X_train, y_train, bs, augment, zmuv, crop):
+            for X_train_batch, y_train_batch, y_onehot_train_batch in iterator_function(X_train, y_train, bs, augment, crop):
+                #pdb.set_trace()
                 y_ord_train_batch = np.asarray([ord_encode(elem) for elem in y_train_batch], dtype="float32")
                 this_train_losses.append( train_fn(X_train_batch, y_train_batch, y_ord_train_batch, y_onehot_train_batch) )
+                #print this_train_losses[-1]
             time_taken = time() - t0        
 
             # validation loss loop
             this_valid_losses = []
-            for X_valid_batch, y_valid_batch, y_onehot_valid_batch in iterate_baseline(X_valid, y_valid, bs, False, zmuv, crop):
+            for X_valid_batch, y_valid_batch, y_onehot_valid_batch in iterate_baseline(X_valid, y_valid, bs, False, crop):
                 y_ord_valid_batch = np.asarray([ord_encode(elem) for elem in y_valid_batch], dtype="float32")
                 this_valid_losses.append( loss_fn(X_valid_batch, y_valid_batch, y_ord_valid_batch, y_onehot_valid_batch) )
+                #print this_valid_losses[-1]
             avg_valid_loss = np.mean(this_valid_losses)
         
         # validation accuracy loop
@@ -892,7 +938,7 @@ def train_baseline(net_cfg,
         if save_valid_dists != None:
             svd = open("%s.txt" % save_valid_dists, "wb")
             
-        for X_valid_batch, y_valid_batch, _ in iterate_baseline(X_valid, y_valid, bs, False, zmuv, crop):
+        for X_valid_batch, y_valid_batch, _ in iterate_baseline(X_valid, y_valid, bs, False, crop):
 
             # just do argmax to get the predictions for valid_kappa, but only if not is_hacky_ordinal
 
@@ -901,7 +947,7 @@ def train_baseline(net_cfg,
             
             dists, dists_exp = dist_fn(X_valid_batch)
 
-            if is_hacky_ordinal:
+            if net_cfg["mode"] in ["hacky_ordinal"]:
                 for dist in dists:
                     valid_preds_hacky_ordinal.append( convert_hacky_ord_dist_into_label(dist) )
 
@@ -926,7 +972,7 @@ def train_baseline(net_cfg,
             
         valid_acc = np.mean(valid_preds == y_valid)
 
-        if not is_hacky_ordinal:        
+        if not net_cfg["mode"] in ["hacky_ordinal"]:        
             valid_kappa = hp.weighted_kappa(human_rater=valid_preds, actual_rater=y_valid, num_classes=5)
         else:
             valid_kappa = hp.weighted_kappa(human_rater=valid_preds_hacky_ordinal, actual_rater=y_valid, num_classes=5)
@@ -941,8 +987,8 @@ def train_baseline(net_cfg,
                     (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, valid_kappa_mc, time_taken) 
             )
             f.flush()
-        if print_out:
-            print "%i,%f,%f,%f,%f,%f,%f,%f" % (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, valid_kappa_mc, time_taken)
+        #if print_out:
+        print "%i,%f,%f,%f,%f,%f,%f,%f" % (epoch+1, np.mean(this_train_losses), avg_valid_loss, valid_acc, valid_kappa, valid_kappa_exp, valid_kappa_mc, time_taken)
             
         with open("models/%s.modelv2.%i" % (os.path.basename(out_file),epoch+1), "wb") as g:
             pickle.dump(get_all_param_values(l_exp), g, pickle.HIGHEST_PROTOCOL) 
@@ -972,6 +1018,12 @@ def lstm_orthog(args):
 
     gate_parameters = Gate(W_in=Orthogonal(), W_hid=Orthogonal(), b=Constant(0.))
     cell_parameters = Gate(W_in=Orthogonal(), W_hid=Orthogonal(), W_cell=None, b=Constant(0.), nonlinearity=tanh)
+    if "forget_init" not in args:
+        forget_init=0.0
+    else:
+        forget_init=args["forget_init"]
+    print "lstm_orthog(): forget init =", forget_init
+    forgetgate_parameters = Gate(W_in=Orthogonal(), W_hid=Orthogonal(), b=Constant(forget_init))
     
     num_units = args["num_units"] 
     seqlen, num_classes = 28*28, 256
@@ -982,7 +1034,7 @@ def lstm_orthog(args):
         precompute_input=True,
         ingate=gate_parameters,
         outgate=gate_parameters,
-        forgetgate=gate_parameters,
+        forgetgate=forgetgate_parameters,
         cell=cell_parameters
     )
     l_shp = ReshapeLayer(l_lstm, (-1, num_units))
@@ -990,7 +1042,7 @@ def lstm_orthog(args):
     l_shp2 = ReshapeLayer(l_dense, (-1, seqlen, num_classes))
     for layer in get_all_layers(l_shp2):
         print layer, layer.output_shape
-    print "num params:", count_params(l_shp2)
+    print "lstm_orthog(): num params:", count_params(l_shp2)
     return l_shp2
 
 
@@ -1007,26 +1059,44 @@ def get_net_lstm(net_cfg, args):
     X_I = T.imatrix('y')
     net_out, exp_out = get_output([l_out, l_exp], X)
     params = get_all_params(l_out, trainable=True)
-    if "klo" not in args:
+    if args["mode"] == "xent":
         print "get_net_lstm(): using cross-entropy"
         loss = categorical_crossentropy(net_out[:,0:-1,:], X[:,1::,:]).mean()
         loss_det = loss
-    else:
+    elif args["mode"] == "qwk":
+        print "get_net_lstm(): using qwk loss"
+        # merge bs and seq axis
+        net_out_flattened = net_out[:,0:-1,:]
+        net_out_flattened = net_out_flattened.reshape((-1, net_out_flattened.shape[-1]))
+        X_flattened = X[:,1::,:]
+        X_flattened = X_flattened.reshape((-1, X_flattened.shape[-1]))
+        loss = qwk(net_out_flattened, X_flattened, num_classes=256)
+        loss_det = categorical_crossentropy(net_out[:,0:-1,:], X[:,1::,:]).mean()
+    elif args["mode"] == "klo":
         print "get_net_lstm(): using 'klo' loss"
         loss = squared_error( exp_out[:,0:-1,0], X_I[:,1::]).mean()
         loss_det = categorical_crossentropy(net_out[:,0:-1,:], X[:,1::,:]).mean()
         #params += [l_exp_dense.W]
+    else:
+        raise Exception("you must specify a mode!!")
 
     learning_rate = theano.shared(floatX(0.01)) if "learning_rate" not in args else theano.shared(floatX(args["learning_rate"]))
-    sys.stderr.write("learning rate: %f\n" % args["learning_rate"])
+    print "get_net_lstm(): learning rate = %f" % args["learning_rate"]
     grads = T.grad(loss, params)
-    momentum = 0.9 if "momentum" not in args else args["momentum"]
-    if "rmsprop" in args:
-        sys.stderr.write("get_net_lstm(): using rmsprop\n")
-        updates = rmsprop(grads, params, learning_rate=learning_rate)
+    if "clip" in args:
+        print "get_net_lstm(): adding total_norm_constraint =", args["clip"]
+        grads = total_norm_constraint(grads, args["clip"])
+    momentum = 0.0 if "momentum" not in args else args["momentum"]
+    if args["optim"] == "rmsprop":
+        print "get_net_lstm(): using rmsprop"
+        updates = rmsprop(grads, params, learning_rate=learning_rate, rho=momentum)
+    elif args["optim"] == "adam":
+        print "get_net_lstm(): using adam"
+        updates = adam(grads, params, learning_rate=learning_rate)        
     else:
+        print "get_net_lstm(): using nesterov momentum"
         updates = nesterov_momentum(grads, params, learning_rate=learning_rate, momentum=momentum)
-
+        
     train_fn = theano.function([X, X_I], loss, updates=updates, on_unused_input='warn')
     loss_fn = theano.function([X, X_I], loss_det, on_unused_input='warn')
     dist_fn = theano.function(
@@ -1063,7 +1133,7 @@ def train_lstm(net_cfg,
             
     # extract functions
     X_train_I, X_valid_I = data
-    X_valid_I_flatten = X_valid_I.flatten()
+    X_valid_I_flatten = X_valid_I[:,1::].flatten()
     train_fn, loss_fn, dist_fn = net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["dist_fn"]
     learning_rate = net_cfg["learning_rate"]
     bs = net_cfg["bs"]
@@ -1104,10 +1174,12 @@ def train_lstm(net_cfg,
             
         for X_valid_I_batch, X_valid_batch in iterator_function(X_valid_I, bs):
 
-            #pdb.set_trace()
-
             dists, dists_exp = dist_fn(X_valid_batch)
+            dists, dists_exp = dists[:,0:-1,:], dists_exp[:,0:-1,:]
 
+            if debug:
+                pdb.set_trace()
+            
             # compute the argmax
             # (bs, 784, 256) --> (bs, 784) --> (bs*784)
             this_argmaxes = np.argmax(dists, axis=2).flatten()
